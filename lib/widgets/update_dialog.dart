@@ -73,11 +73,11 @@ class _UpdateDialogState extends State<UpdateDialog> {
               _descargando = false;
               break;
             case OtaStatus.PERMISSION_NOT_GRANTED_ERROR:
-              _errorMensaje = 'Permiso no concedido para instalar aplicaciones desconocidas.';
+              _errorMensaje = 'Permiso no concedido para instalar aplicaciones. Puedes descargarlo e instalarlo vía navegador.';
               _descargando = false;
               break;
             case OtaStatus.INTERNAL_ERROR:
-              _errorMensaje = 'Error interno al procesar el archivo APK.';
+              _errorMensaje = 'No se pudo abrir el instalador automático. Toca el botón para instalar directamente vía navegador.';
               _descargando = false;
               break;
             default:
@@ -89,7 +89,7 @@ class _UpdateDialogState extends State<UpdateDialog> {
         if (!mounted) return;
         setState(() {
           _descargando = false;
-          _errorMensaje = 'No se pudo descargar automáticamente: $e';
+          _errorMensaje = 'No se pudo completar la instalación automática. Puedes instalar directamente vía navegador.';
         });
       },
       onDone: () {
@@ -224,20 +224,26 @@ class _UpdateDialogState extends State<UpdateDialog> {
               if (_errorMensaje != null) ...[
                 const SizedBox(height: 12),
                 Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
                     color: AgroTheme.error.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AgroTheme.error.withValues(alpha: 0.3)),
                   ),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.error_outline, color: AgroTheme.error, size: 16),
-                      const SizedBox(width: 6),
-                      Expanded(
-                        child: Text(
-                          _errorMensaje!,
-                          style: const TextStyle(fontSize: 11, color: AgroTheme.error),
-                        ),
+                      Row(
+                        children: [
+                          const Icon(Icons.error_outline, color: AgroTheme.error, size: 16),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              _errorMensaje!,
+                              style: const TextStyle(fontSize: 11.5, color: AgroTheme.error, fontWeight: FontWeight.w500),
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -248,12 +254,28 @@ class _UpdateDialogState extends State<UpdateDialog> {
         ),
         actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         actions: [
-          if (!_descargando && !widget.versionRemota.obligatoria)
+          if (!_descargando && _errorMensaje != null) ...[
             TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Más tarde'),
+              onPressed: _iniciarActualizacion,
+              child: const Text('Reintentar'),
             ),
-          if (!_descargando)
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              ),
+              icon: const Icon(Icons.open_in_browser, size: 18),
+              label: const Text('Instalar vía Navegador'),
+              onPressed: _abrirEnNavegador,
+            ),
+          ] else if (!_descargando) ...[
+            if (!widget.versionRemota.obligatoria)
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Más tarde'),
+              ),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: primary,
@@ -264,13 +286,14 @@ class _UpdateDialogState extends State<UpdateDialog> {
               icon: const Icon(Icons.download_rounded, size: 18),
               label: const Text('Actualizar Ahora'),
               onPressed: _iniciarActualizacion,
-            )
-          else
+            ),
+          ] else ...[
             TextButton.icon(
               icon: const Icon(Icons.open_in_browser, size: 16),
               label: const Text('Descargar vía Navegador'),
               onPressed: _abrirEnNavegador,
             ),
+          ],
         ],
       ),
     );

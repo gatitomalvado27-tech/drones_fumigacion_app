@@ -121,6 +121,7 @@ class UpdateService {
       return OtaUpdate().execute(
         apkUrl,
         destinationFilename: 'IcaroProagro_update.apk',
+        androidProviderAuthority: 'com.example.drones_fumigacion_app.ota_update_provider',
       );
     } catch (e) {
       debugPrint('Error iniciando OtaUpdate: $e');
