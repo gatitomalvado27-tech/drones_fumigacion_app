@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/agro_theme.dart';
@@ -15,10 +16,42 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
   String _errorMsg = '';
   bool _recordarCelular = true;
 
-  // PIN Maestro predeterminado: 2026 (o el que defina la familia)
-  static const String _pinCorrectoDefault = '2026';
+  // Estado para creación de PIN en primer uso
+  bool _cargando = true;
+  bool _esPrimerUso = false;
+  int _pasoCreacion = 0; // 0: primer ingreso, 1: confirmar
+  String _primerPinTemporal = '';
+
+  // Protección contra fuerza bruta
+  int _intentosFallidos = 0;
+  bool _bloqueado = false;
+  int _segundosBloqueo = 0;
+  Timer? _timerBloqueo;
+
+  @override
+  void initState() {
+    super.initState();
+    _verificarSiExistePin();
+  }
+
+  @override
+  void dispose() {
+    _timerBloqueo?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _verificarSiExistePin() async {
+    final prefs = await SharedPreferences.getInstance();
+    final pin = prefs.getString('proicaro_pin_personalizado');
+    setState(() {
+      _cargando = false;
+      _esPrimerUso = (pin == null || pin.isEmpty);
+    });
+  }
 
   void _onNumeroPresionado(String digito) {
+    if (_bloqueado || _cargando) return;
+
     if (_pinIngresado.length < 4) {
       setState(() {
         _pinIngresado += digito;
@@ -26,12 +59,18 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
       });
 
       if (_pinIngresado.length == 4) {
-        _verificarPin();
+        if (_esPrimerUso) {
+          _procesarCreacionPin();
+        } else {
+          _verificarPin();
+        }
       }
     }
   }
 
   void _onBorrar() {
+    if (_bloqueado || _cargando) return;
+
     if (_pinIngresado.isNotEmpty) {
       setState(() {
         _pinIngresado = _pinIngresado.substring(0, _pinIngresado.length - 1);
@@ -40,11 +79,50 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
     }
   }
 
+  Future<void> _procesarCreacionPin() async {
+    if (_pasoCreacion == 0) {
+      setState(() {
+        _primerPinTemporal = _pinIngresado;
+        _pinIngresado = '';
+        _pasoCreacion = 1;
+        _errorMsg = '';
+      });
+    } else {
+      if (_pinIngresado == _primerPinTemporal) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('proicaro_pin_personalizado', _pinIngresado);
+        if (_recordarCelular) {
+          await prefs.setBool('proicaro_dispositivo_autorizado', true);
+        }
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('¡PIN de seguridad configurado exitosamente!'),
+            backgroundColor: AgroTheme.primary,
+          ),
+        );
+
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const HomeScreen()),
+        );
+      } else {
+        setState(() {
+          _errorMsg = 'Los PIN no coinciden. Intenta de nuevo.';
+          _pinIngresado = '';
+          _pasoCreacion = 0;
+          _primerPinTemporal = '';
+        });
+      }
+    }
+  }
+
   Future<void> _verificarPin() async {
     final prefs = await SharedPreferences.getInstance();
-    final pinGuardado = prefs.getString('proicaro_pin_personalizado') ?? _pinCorrectoDefault;
+    final pinGuardado = prefs.getString('proicaro_pin_personalizado') ?? '2026';
 
-    if (_pinIngresado == pinGuardado || _pinIngresado == _pinCorrectoDefault) {
+    if (_pinIngresado == pinGuardado) {
+      _intentosFallidos = 0;
       if (_recordarCelular) {
         await prefs.setBool('proicaro_dispositivo_autorizado', true);
       }
@@ -54,15 +132,69 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
         MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
     } else {
+      _intentosFallidos++;
       setState(() {
-        _errorMsg = 'PIN incorrecto. Intenta nuevamente.';
         _pinIngresado = '';
+        if (_intentosFallidos >= 5) {
+          _iniciarBloqueo(30);
+        } else {
+          final restantes = 5 - _intentosFallidos;
+          _errorMsg = 'PIN incorrecto. Te quedan $restantes intentos.';
+        }
       });
     }
   }
 
+  void _iniciarBloqueo(int segundos) {
+    setState(() {
+      _bloqueado = true;
+      _segundosBloqueo = segundos;
+      _errorMsg = 'Demasiados intentos. Teclado bloqueado por $segundos segundos.';
+    });
+
+    _timerBloqueo?.cancel();
+    _timerBloqueo = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) return;
+      setState(() {
+        if (_segundosBloqueo > 1) {
+          _segundosBloqueo--;
+          _errorMsg = 'Demasiados intentos. Teclado bloqueado por $_segundosBloqueo s.';
+        } else {
+          _bloqueado = false;
+          _segundosBloqueo = 0;
+          _intentosFallidos = 0;
+          _errorMsg = '';
+          timer.cancel();
+        }
+      });
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_cargando) {
+      return const Scaffold(
+        backgroundColor: AgroTheme.background,
+        body: Center(child: CircularProgressIndicator(color: AgroTheme.primary)),
+      );
+    }
+
+    String titulo;
+    String subtitulo;
+
+    if (_esPrimerUso) {
+      if (_pasoCreacion == 0) {
+        titulo = 'Configura tu PIN de Seguridad';
+        subtitulo = 'Crea una clave de 4 dígitos para este dispositivo';
+      } else {
+        titulo = 'Confirma tu nuevo PIN';
+        subtitulo = 'Vuelve a escribir los 4 dígitos para confirmar';
+      }
+    } else {
+      titulo = 'Ingresa tu PIN de 4 dígitos';
+      subtitulo = 'Control de Acceso Seguro Icaro Proagro';
+    }
+
     return Scaffold(
       backgroundColor: AgroTheme.background,
       body: SafeArea(
@@ -76,8 +208,8 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(20),
                   child: Container(
-                    width: 90,
-                    height: 90,
+                    width: 86,
+                    height: 86,
                     decoration: BoxDecoration(
                       color: AgroTheme.surfaceContainerHigh,
                       borderRadius: BorderRadius.circular(20),
@@ -97,12 +229,12 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 18),
+                const SizedBox(height: 16),
 
                 const Text(
                   'Icaro Proagro',
                   style: TextStyle(
-                    fontSize: 28,
+                    fontSize: 26,
                     fontWeight: FontWeight.w900,
                     color: AgroTheme.onSurface,
                     letterSpacing: -0.5,
@@ -117,7 +249,7 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
                   ),
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 20),
 
                 // BADGE DE SEGURIDAD
                 Container(
@@ -127,32 +259,38 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(color: AgroTheme.primary.withValues(alpha: 0.3)),
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.shield, size: 15, color: AgroTheme.primary),
-                      SizedBox(width: 6),
+                      Icon(
+                        _esPrimerUso ? Icons.lock_reset_rounded : Icons.shield_rounded,
+                        size: 15,
+                        color: AgroTheme.primary,
+                      ),
+                      const SizedBox(width: 6),
                       Text(
-                        'Acceso Seguro Familiar',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AgroTheme.primary),
+                        _esPrimerUso ? 'Primer Inicio - Seguridad' : 'Acceso Protegido',
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AgroTheme.primary),
                       ),
                     ],
                   ),
                 ),
 
-                const SizedBox(height: 24),
+                const SizedBox(height: 22),
 
-                const Text(
-                  'Ingresa tu PIN de 4 dígitos',
-                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AgroTheme.onSurface),
+                Text(
+                  titulo,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AgroTheme.onSurface),
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'PIN inicial: 2026',
-                  style: TextStyle(fontSize: 11, color: AgroTheme.onSurfaceVariant),
+                Text(
+                  subtitulo,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 12, color: AgroTheme.onSurfaceVariant),
                 ),
 
-                const SizedBox(height: 18),
+                const SizedBox(height: 20),
 
                 // PUNTOS INDICADORES DE PIN
                 Row(
@@ -185,53 +323,63 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
                 ),
 
                 if (_errorMsg.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    _errorMsg,
-                    style: const TextStyle(color: AgroTheme.error, fontSize: 13, fontWeight: FontWeight.bold),
+                  const SizedBox(height: 14),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: AgroTheme.error.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AgroTheme.error.withValues(alpha: 0.3)),
+                    ),
+                    child: Text(
+                      _errorMsg,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: AgroTheme.error, fontSize: 12, fontWeight: FontWeight.w600),
+                    ),
                   ),
                 ],
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 18),
 
                 // OPCIÓN RECORDAR CELULAR
-                InkWell(
-                  onTap: () {
-                    setState(() {
-                      _recordarCelular = !_recordarCelular;
-                    });
-                  },
-                  borderRadius: BorderRadius.circular(10),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Checkbox(
-                          value: _recordarCelular,
-                          activeColor: AgroTheme.primary,
-                          checkColor: Colors.black,
-                          onChanged: (v) {
-                            setState(() {
-                              _recordarCelular = v ?? true;
-                            });
-                          },
-                        ),
-                        const Text(
-                          'Recordar este celular (Solo pedir una vez)',
-                          style: TextStyle(fontSize: 12, color: AgroTheme.onSurfaceVariant),
-                        ),
-                      ],
+                if (!_bloqueado)
+                  InkWell(
+                    onTap: () {
+                      setState(() {
+                        _recordarCelular = !_recordarCelular;
+                      });
+                    },
+                    borderRadius: BorderRadius.circular(10),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Checkbox(
+                            value: _recordarCelular,
+                            activeColor: AgroTheme.primary,
+                            checkColor: Colors.black,
+                            onChanged: (v) {
+                              setState(() {
+                                _recordarCelular = v ?? true;
+                              });
+                            },
+                          ),
+                          const Text(
+                            'Mantener este celular autorizado',
+                            style: TextStyle(fontSize: 12, color: AgroTheme.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                ),
 
-                const SizedBox(height: 14),
+                const SizedBox(height: 12),
 
                 // TECLADO NUMÉRICO ESTILO COCKPIT
                 _buildTecladoNumerico(),
 
-                const SizedBox(height: 14),
+                const SizedBox(height: 10),
               ],
             ),
           ),
@@ -281,8 +429,12 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
                 width: 70,
                 height: 56,
                 child: IconButton(
-                  icon: const Icon(Icons.backspace_outlined, color: AgroTheme.onSurfaceVariant, size: 24),
-                  onPressed: _onBorrar,
+                  icon: Icon(
+                    Icons.backspace_outlined,
+                    color: _bloqueado ? AgroTheme.outlineVariant : AgroTheme.onSurfaceVariant,
+                    size: 24,
+                  ),
+                  onPressed: _bloqueado ? null : _onBorrar,
                 ),
               ),
             ],
@@ -298,8 +450,8 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
       height: 56,
       child: ElevatedButton(
         style: ElevatedButton.styleFrom(
-          backgroundColor: AgroTheme.surfaceContainerHigh,
-          foregroundColor: AgroTheme.onSurface,
+          backgroundColor: _bloqueado ? AgroTheme.surfaceContainerLowest : AgroTheme.surfaceContainerHigh,
+          foregroundColor: _bloqueado ? AgroTheme.outlineVariant : AgroTheme.onSurface,
           elevation: 0,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
@@ -307,7 +459,7 @@ class _PinLoginScreenState extends State<PinLoginScreen> {
           ),
           padding: EdgeInsets.zero,
         ),
-        onPressed: () => _onNumeroPresionado(numero),
+        onPressed: _bloqueado ? null : () => _onNumeroPresionado(numero),
         child: Text(
           numero,
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),

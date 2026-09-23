@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Permitir acceso a la configuración de actualización
+    match /app_config/actualizacion {
+      allow read: if true;
+      allow write: if true;
+    }
+
+    // Colecciones de la aplicación
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

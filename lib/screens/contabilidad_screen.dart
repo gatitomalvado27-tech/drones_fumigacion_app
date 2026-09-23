@@ -27,6 +27,15 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
   String _filtroCuenta = 'TODAS'; // 'TODAS', 'EFECTIVO', 'BANCOLOMBIA', 'NEQUI', etc.
   String _busqueda = '';
   DateTimeRange? _rangoPersonalizado;
+  int _semanaOffset = 0; // 0 = actual, -1 = semana anterior, -2 = hace 2 semanas, etc.
+
+  int get _filtrosActivosCount {
+    int count = 0;
+    if (_filtroJornada != 'TODO') count++;
+    if (_filtroTipo != 'TODOS') count++;
+    if (_filtroCuenta != 'TODAS') count++;
+    return count;
+  }
 
   final NumberFormat _currencyFormat = NumberFormat.currency(
     locale: 'es_CO',
@@ -46,6 +55,13 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
     super.dispose();
   }
 
+  DateTime _obtenerLunesSemana(int offset) {
+    final now = DateTime.now();
+    final fechaRef = now.add(Duration(days: offset * 7));
+    final inicioSemana = fechaRef.subtract(Duration(days: fechaRef.weekday - 1));
+    return DateTime(inicioSemana.year, inicioSemana.month, inicioSemana.day);
+  }
+
   bool _estaEnPeriodo(DateTime fecha) {
     final now = DateTime.now();
 
@@ -60,8 +76,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
     if (_filtroPeriodo == 'HOY') {
       return fecha.year == now.year && fecha.month == now.month && fecha.day == now.day;
     } else if (_filtroPeriodo == 'ESTA_SEMANA') {
-      final inicioSemana = now.subtract(Duration(days: now.weekday - 1));
-      final lunes = DateTime(inicioSemana.year, inicioSemana.month, inicioSemana.day);
+      final lunes = _obtenerLunesSemana(_semanaOffset);
       final domingo = lunes.add(const Duration(days: 7));
       return fecha.isAfter(lunes.subtract(const Duration(seconds: 1))) && fecha.isBefore(domingo);
     } else if (_filtroPeriodo == 'ESTE_MES') {
@@ -81,7 +96,11 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
 
   String _getTituloPeriodo() {
     if (_filtroPeriodo == 'HOY') return 'Rendimiento de Hoy';
-    if (_filtroPeriodo == 'ESTA_SEMANA') return 'Rendimiento de Esta Semana';
+    if (_filtroPeriodo == 'ESTA_SEMANA') {
+      if (_semanaOffset == 0) return 'Rendimiento de Esta Semana';
+      if (_semanaOffset == -1) return 'Rendimiento de la Semana Pasada';
+      return 'Rendimiento de hace ${-_semanaOffset} semanas';
+    }
     if (_filtroPeriodo == 'ESTE_MES') return 'Rendimiento de Este Mes';
     if (_filtroPeriodo == 'MES_PASADO') return 'Rendimiento del Mes Pasado';
     if (_filtroPeriodo == 'ESTE_ANO') return 'Rendimiento de Este Año (${DateTime.now().year})';
@@ -89,6 +108,22 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
       return 'Rango: ${DateFormat('dd/MM').format(_rangoPersonalizado!.start)} - ${DateFormat('dd/MM').format(_rangoPersonalizado!.end)}';
     }
     return 'Rendimiento Histórico Total';
+  }
+
+  String _getNombreCortoPeriodo() {
+    if (_filtroPeriodo == 'HOY') return 'Hoy';
+    if (_filtroPeriodo == 'ESTA_SEMANA') {
+      if (_semanaOffset == 0) return 'Esta Semana';
+      if (_semanaOffset == -1) return 'Semana Pasada';
+      return 'Sem. ${-_semanaOffset}';
+    }
+    if (_filtroPeriodo == 'ESTE_MES') return 'Este Mes';
+    if (_filtroPeriodo == 'MES_PASADO') return 'Mes Pasado';
+    if (_filtroPeriodo == 'ESTE_ANO') return 'Este Año';
+    if (_filtroPeriodo == 'PERSONALIZADO' && _rangoPersonalizado != null) {
+      return '${DateFormat('dd/MM').format(_rangoPersonalizado!.start)}-${DateFormat('dd/MM').format(_rangoPersonalizado!.end)}';
+    }
+    return 'Histórico';
   }
 
   @override
@@ -192,43 +227,167 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
               ),
             ),
 
-            // FILTRO TEMPORAL
+            // BARRA UNIFICADA DE CONTROL Y FILTROS
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 2.0),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _buildPeriodoChip('HOY', 'Hoy', primary, onSurfaceVariant, cardBg, borderColor),
-                    _buildPeriodoChip('ESTA_SEMANA', 'Esta Semana', primary, onSurfaceVariant, cardBg, borderColor),
-                    _buildPeriodoChip('ESTE_MES', 'Este Mes', primary, onSurfaceVariant, cardBg, borderColor),
-                    _buildPeriodoChip('MES_PASADO', 'Mes Pasado', primary, onSurfaceVariant, cardBg, borderColor),
-                    _buildPeriodoChip('ESTE_ANO', 'Este Año', primary, onSurfaceVariant, cardBg, borderColor),
-                    _buildPeriodoChip('TODO', 'Histórico', primary, onSurfaceVariant, cardBg, borderColor),
-                    _buildPeriodoChip('PERSONALIZADO', _rangoPersonalizado != null
-                        ? '${DateFormat('dd/MM').format(_rangoPersonalizado!.start)} - ${DateFormat('dd/MM').format(_rangoPersonalizado!.end)}'
-                        : '📅 Rango...', primary, onSurfaceVariant, cardBg, borderColor),
-                  ],
-                ),
+              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 4.0),
+              child: Row(
+                children: [
+                  // Selector de Período Rápido
+                  InkWell(
+                    onTap: () => _mostrarSelectorPeriodo(context),
+                    borderRadius: BorderRadius.circular(12),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: primary.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: primary.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.calendar_month_rounded, size: 15, color: primary),
+                          const SizedBox(width: 6),
+                          Text(
+                            _getNombreCortoPeriodo(),
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: primary),
+                          ),
+                          const SizedBox(width: 4),
+                          Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: primary),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(width: 8),
+
+                  // Buscador Rápido
+                  Expanded(
+                    child: SizedBox(
+                      height: 38,
+                      child: TextField(
+                        decoration: InputDecoration(
+                          isDense: true,
+                          hintText: 'Buscar movimiento...',
+                          hintStyle: TextStyle(fontSize: 11.5, color: onSurfaceVariant),
+                          prefixIcon: Icon(Icons.search, size: 16, color: onSurfaceVariant),
+                          suffixIcon: _busqueda.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, size: 15),
+                                  onPressed: () => setState(() => _busqueda = ''),
+                                )
+                              : null,
+                          filled: true,
+                          fillColor: cardBg,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: borderColor.withValues(alpha: 0.4)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: borderColor.withValues(alpha: 0.3)),
+                          ),
+                        ),
+                        style: TextStyle(color: onSurface, fontSize: 12),
+                        onChanged: (val) => setState(() => _busqueda = val),
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(width: 8),
+
+                  // Botón de Filtros Avanzados con Badge
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      IconButton.filledTonal(
+                        style: IconButton.styleFrom(
+                          backgroundColor: _filtrosActivosCount > 0
+                              ? primary.withValues(alpha: 0.2)
+                              : Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                          minimumSize: const Size(38, 38),
+                          padding: EdgeInsets.zero,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        icon: Icon(
+                          Icons.tune_rounded,
+                          size: 18,
+                          color: _filtrosActivosCount > 0 ? primary : onSurfaceVariant,
+                        ),
+                        tooltip: 'Filtros avanzados',
+                        onPressed: () => _mostrarModalFiltrosAvanzados(context),
+                      ),
+                      if (_filtrosActivosCount > 0)
+                        Positioned(
+                          top: -3,
+                          right: -3,
+                          child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(
+                              color: AgroTheme.primary,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Text(
+                              '$_filtrosActivosCount',
+                              style: const TextStyle(
+                                fontSize: 9,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
               ),
             ),
 
-            // FILTRO DE FRANJA HORARIA / JORNADA (MAÑANA VS TARDE)
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 2.0),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    _buildJornadaChip('TODO', 'Todo el día', Icons.access_time),
-                    _buildJornadaChip('MANANA', '☀️ Mañana (5am-12pm)', Icons.wb_twilight),
-                    _buildJornadaChip('TARDE', '⛅ Tarde (12pm-7pm)', Icons.wb_cloudy_outlined),
-                  ],
+            // TIRA DE FILTROS ACTIVOS (SOLO VISIBLE SI HAY FILTROS APLICADOS)
+            if (_filtrosActivosCount > 0)
+              Padding(
+                padding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 4.0, bottom: 4.0),
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      if (_filtroJornada != 'TODO')
+                        _buildActiveChip(
+                          label: _filtroJornada == 'MANANA' ? '☀️ Mañana' : '⛅ Tarde',
+                          onDeleted: () => setState(() => _filtroJornada = 'TODO'),
+                        ),
+                      if (_filtroTipo != 'TODOS')
+                        _buildActiveChip(
+                          label: _filtroTipo == 'INGRESO' ? '🟢 Ingresos' : '🔴 Egresos',
+                          onDeleted: () => setState(() => _filtroTipo = 'TODOS'),
+                        ),
+                      if (_filtroCuenta != 'TODAS')
+                        _buildActiveChip(
+                          label: TransaccionModel.nombreMetodo(_filtroCuenta),
+                          onDeleted: () => setState(() => _filtroCuenta = 'TODAS'),
+                        ),
+                      TextButton(
+                        style: TextButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(horizontal: 8),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        onPressed: () {
+                          setState(() {
+                            _filtroJornada = 'TODO';
+                            _filtroTipo = 'TODOS';
+                            _filtroCuenta = 'TODAS';
+                          });
+                        },
+                        child: const Text('Limpiar filtros', style: TextStyle(fontSize: 11, color: AgroTheme.error)),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
 
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
 
             // TAB BAR ESTILO STITCH
             Container(
@@ -280,78 +439,409 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
     );
   }
 
-  Widget _buildPeriodoChip(String key, String label, Color primary, Color onSurfaceVariant, Color cardBg, Color borderColor) {
-    final sel = _filtroPeriodo == key;
+  Widget _buildActiveChip({required String label, required VoidCallback onDeleted}) {
+    final primary = Theme.of(context).colorScheme.primary;
+
     return Padding(
-      padding: const EdgeInsets.only(right: 8.0),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: sel,
-        selectedColor: primary.withValues(alpha: 0.2),
-        backgroundColor: cardBg,
-        labelStyle: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w600,
-          color: sel ? primary : onSurfaceVariant,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.4)),
-        ),
-        onSelected: (val) async {
-          if (key == 'PERSONALIZADO') {
-            final picked = await showDateRangePicker(
-              context: context,
-              firstDate: DateTime(2023),
-              lastDate: DateTime(2030),
-              initialDateRange: _rangoPersonalizado ?? DateTimeRange(
-                start: DateTime.now().subtract(const Duration(days: 7)),
-                end: DateTime.now(),
-              ),
-            );
-            if (picked != null) {
-              setState(() {
-                _rangoPersonalizado = picked;
-                _filtroPeriodo = 'PERSONALIZADO';
-              });
-            }
-          } else {
-            if (val) setState(() => _filtroPeriodo = key);
-          }
-        },
+      padding: const EdgeInsets.only(right: 6.0),
+      child: Chip(
+        label: Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: primary)),
+        deleteIcon: Icon(Icons.close_rounded, size: 13, color: primary),
+        onDeleted: onDeleted,
+        backgroundColor: primary.withValues(alpha: 0.12),
+        side: BorderSide(color: primary.withValues(alpha: 0.3)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 0),
+        materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
     );
   }
 
-  Widget _buildJornadaChip(String key, String label, IconData icon) {
-    final sel = _filtroJornada == key;
+  Widget _buildSegmentButton(String tipo, String label, Color primary, Color onSurface, Color onSurfaceVariant) {
+    final sel = _filtroTipo == tipo;
+    return Expanded(
+      child: InkWell(
+        onTap: () => setState(() => _filtroTipo = tipo),
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: sel ? primary : Colors.transparent,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: sel ? FontWeight.bold : FontWeight.w500,
+              color: sel ? Colors.black : onSurfaceVariant,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _mostrarSelectorPeriodo(BuildContext context) {
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final onSurfaceVariant = Theme.of(context).colorScheme.onSurfaceVariant;
+    final cardBg = Theme.of(context).colorScheme.surface;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    margin: const EdgeInsets.only(bottom: 16),
+                    decoration: BoxDecoration(
+                      color: onSurfaceVariant.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Seleccionar Período Contable',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: onSurface),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 20),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                _buildPeriodoModalOption(
+                  ctx: ctx,
+                  key: 'HOY',
+                  title: 'Hoy',
+                  subtitle: 'Movimientos registrados el día de hoy',
+                  icon: Icons.today_rounded,
+                ),
+                _buildPeriodoModalOption(
+                  ctx: ctx,
+                  key: 'ESTA_SEMANA',
+                  title: 'Esta Semana (Lun - Dom)',
+                  subtitle: _semanaOffset == 0 ? 'Semana en curso' : 'Semana seleccionada (offset $_semanaOffset)',
+                  icon: Icons.view_week_rounded,
+                ),
+                _buildPeriodoModalOption(
+                  ctx: ctx,
+                  key: 'ESTE_MES',
+                  title: 'Este Mes',
+                  subtitle: 'Consolidado del mes en curso',
+                  icon: Icons.calendar_month_rounded,
+                ),
+                _buildPeriodoModalOption(
+                  ctx: ctx,
+                  key: 'MES_PASADO',
+                  title: 'Mes Pasado',
+                  subtitle: 'Consolidado del mes inmediatamente anterior',
+                  icon: Icons.history_rounded,
+                ),
+                _buildPeriodoModalOption(
+                  ctx: ctx,
+                  key: 'ESTE_ANO',
+                  title: 'Este Año (${DateTime.now().year})',
+                  subtitle: 'Todos los movimientos acumulados de este año',
+                  icon: Icons.calendar_today_rounded,
+                ),
+                _buildPeriodoModalOption(
+                  ctx: ctx,
+                  key: 'PERSONALIZADO',
+                  title: 'Rango Personalizado...',
+                  subtitle: _rangoPersonalizado != null
+                      ? '${DateFormat('dd/MM/yyyy').format(_rangoPersonalizado!.start)} - ${DateFormat('dd/MM/yyyy').format(_rangoPersonalizado!.end)}'
+                      : 'Elige una fecha inicial y final con calendario',
+                  icon: Icons.date_range_rounded,
+                  onCustomTap: () async {
+                    Navigator.pop(ctx);
+                    final picked = await showDateRangePicker(
+                      context: context,
+                      firstDate: DateTime(2023),
+                      lastDate: DateTime(2030),
+                      initialDateRange: _rangoPersonalizado ?? DateTimeRange(
+                        start: DateTime.now().subtract(const Duration(days: 7)),
+                        end: DateTime.now(),
+                      ),
+                    );
+                    if (picked != null) {
+                      setState(() {
+                        _rangoPersonalizado = picked;
+                        _filtroPeriodo = 'PERSONALIZADO';
+                      });
+                    }
+                  },
+                ),
+                _buildPeriodoModalOption(
+                  ctx: ctx,
+                  key: 'TODO',
+                  title: 'Histórico Completo',
+                  subtitle: 'Todas las transacciones registradas desde el inicio',
+                  icon: Icons.all_inclusive_rounded,
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildPeriodoModalOption({
+    required BuildContext ctx,
+    required String key,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    VoidCallback? onCustomTap,
+  }) {
+    final sel = _filtroPeriodo == key;
     final primary = Theme.of(context).colorScheme.primary;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final onSurfaceVariant = Theme.of(context).colorScheme.onSurfaceVariant;
+
+    return ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      tileColor: sel ? primary.withValues(alpha: 0.1) : null,
+      leading: Container(
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: sel ? primary.withValues(alpha: 0.2) : onSurfaceVariant.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Icon(icon, size: 20, color: sel ? primary : onSurfaceVariant),
+      ),
+      title: Text(
+        title,
+        style: TextStyle(
+          fontSize: 13.5,
+          fontWeight: sel ? FontWeight.bold : FontWeight.w600,
+          color: sel ? primary : onSurface,
+        ),
+      ),
+      subtitle: Text(subtitle, style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+      trailing: sel ? Icon(Icons.check_circle_rounded, color: primary, size: 20) : null,
+      onTap: () {
+        if (onCustomTap != null) {
+          onCustomTap();
+        } else {
+          setState(() {
+            _filtroPeriodo = key;
+            if (key == 'ESTA_SEMANA') {
+              _semanaOffset = 0;
+            }
+          });
+          Navigator.pop(ctx);
+        }
+      },
+    );
+  }
+
+  void _mostrarModalFiltrosAvanzados(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
     final onSurfaceVariant = Theme.of(context).colorScheme.onSurfaceVariant;
     final cardBg = Theme.of(context).colorScheme.surface;
     final borderColor = Theme.of(context).colorScheme.outlineVariant;
 
-    return Padding(
-      padding: const EdgeInsets.only(right: 8.0),
-      child: FilterChip(
-        avatar: Icon(icon, size: 13, color: sel ? primary : onSurfaceVariant),
-        label: Text(label),
-        selected: sel,
-        showCheckmark: false,
-        selectedColor: primary.withValues(alpha: 0.15),
-        backgroundColor: cardBg,
-        labelStyle: TextStyle(
-          fontSize: 10.5,
-          fontWeight: sel ? FontWeight.bold : FontWeight.w500,
-          color: sel ? primary : onSurfaceVariant,
-        ),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.3)),
-        ),
-        onSelected: (val) {
-          setState(() => _filtroJornada = val ? key : 'TODO');
-        },
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return SafeArea(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 16.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: onSurfaceVariant.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Filtros Avanzados',
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: onSurface),
+                        ),
+                        if (_filtrosActivosCount > 0)
+                          TextButton(
+                            onPressed: () {
+                              setModalState(() {
+                                _filtroJornada = 'TODO';
+                                _filtroTipo = 'TODOS';
+                                _filtroCuenta = 'TODAS';
+                              });
+                              setState(() {});
+                            },
+                            child: const Text('Limpiar todo', style: TextStyle(color: AgroTheme.error, fontSize: 12)),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+
+                    // SECCIÓN 1: JORNADA DEL DÍA
+                    Text('Jornada del Día', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: onSurface)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        {'key': 'TODO', 'label': 'Todo el Día', 'icon': Icons.all_inclusive},
+                        {'key': 'MANANA', 'label': '☀️ Mañana (5am-12m)', 'icon': Icons.wb_sunny_outlined},
+                        {'key': 'TARDE', 'label': '⛅ Tarde (12m-7pm)', 'icon': Icons.wb_cloudy_outlined},
+                      ].map((item) {
+                        final sel = _filtroJornada == item['key'];
+                        return ChoiceChip(
+                          label: Text(item['label'] as String),
+                          selected: sel,
+                          selectedColor: primary.withValues(alpha: 0.2),
+                          backgroundColor: cardBg,
+                          labelStyle: TextStyle(
+                            fontSize: 11,
+                            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                            color: sel ? primary : onSurfaceVariant,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.3)),
+                          ),
+                          onSelected: (val) {
+                            setModalState(() => _filtroJornada = val ? (item['key'] as String) : 'TODO');
+                            setState(() {});
+                          },
+                        );
+                      }).toList(),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // SECCIÓN 2: TIPO DE MOVIMIENTO
+                    Text('Tipo de Movimiento', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: onSurface)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      children: [
+                        {'key': 'TODOS', 'label': 'Todos'},
+                        {'key': 'INGRESO', 'label': '🟢 Solo Ingresos'},
+                        {'key': 'EGRESO', 'label': '🔴 Solo Egresos'},
+                      ].map((item) {
+                        final sel = _filtroTipo == item['key'];
+                        return ChoiceChip(
+                          label: Text(item['label'] as String),
+                          selected: sel,
+                          selectedColor: primary.withValues(alpha: 0.2),
+                          backgroundColor: cardBg,
+                          labelStyle: TextStyle(
+                            fontSize: 11,
+                            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                            color: sel ? primary : onSurfaceVariant,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.3)),
+                          ),
+                          onSelected: (val) {
+                            if (val) {
+                              setModalState(() => _filtroTipo = item['key'] as String);
+                              setState(() {});
+                            }
+                          },
+                        );
+                      }).toList(),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // SECCIÓN 3: CUENTA / BANCO EN COLOMBIA
+                    Text('Cuenta / Método de Pago (Colombia)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: onSurface)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        'TODAS', 'EFECTIVO', 'BANCOLOMBIA', 'NEQUI', 'DAVIPLATA', 'DAVIVIENDA', 'BANCO_BOGOTA', 'BBVA', 'PSE'
+                      ].map((cuentaKey) {
+                        final sel = _filtroCuenta == cuentaKey;
+                        final label = cuentaKey == 'TODAS' ? 'Todas las Cuentas' : TransaccionModel.nombreMetodo(cuentaKey);
+                        return ChoiceChip(
+                          label: Text(label),
+                          selected: sel,
+                          selectedColor: primary.withValues(alpha: 0.2),
+                          backgroundColor: cardBg,
+                          labelStyle: TextStyle(
+                            fontSize: 11,
+                            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                            color: sel ? primary : onSurfaceVariant,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.3)),
+                          ),
+                          onSelected: (val) {
+                            setModalState(() => _filtroCuenta = val ? cuentaKey : 'TODAS');
+                            setState(() {});
+                          },
+                        );
+                      }).toList(),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: primary,
+                          foregroundColor: Colors.black,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: () => Navigator.pop(ctx),
+                        child: const Text('Aplicar Filtros', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
     );
   }
 
@@ -461,12 +951,12 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
               return true;
             }).toList();
 
-            // Flujo Semanal Dinámico (Lunes a Domingo de la semana actual)
+            // Flujo Semanal Dinámico basado en _semanaOffset (Permite ver semanas pasadas)
+            final lunes = _obtenerLunesSemana(_semanaOffset);
+            final domingo = lunes.add(const Duration(days: 7));
+            final esSemanaActual = _semanaOffset == 0;
             final now = DateTime.now();
             final hoyDiaSemana = now.weekday; // 1 = Lunes, ..., 7 = Domingo
-            final inicioSemana = now.subtract(Duration(days: hoyDiaSemana - 1));
-            final lunes = DateTime(inicioSemana.year, inicioSemana.month, inicioSemana.day);
-            final domingo = lunes.add(const Duration(days: 7));
 
             final List<String> titulosDias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
             final List<double> flujoNetoPorDia = List.filled(7, 0.0);
@@ -488,6 +978,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
               }
             }
 
+            final totalNetoSemana = flujoNetoPorDia.fold<double>(0.0, (acum, val) => acum + val);
             final maxFlujo = flujoNetoPorDia.map((e) => e.abs()).fold<double>(1.0, (p, e) => e > p ? e : p);
 
             return SingleChildScrollView(
@@ -1210,33 +1701,88 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'Flujo de Caja Semanal',
+                                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: onSurface),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: (totalNetoSemana >= 0 ? primary : AgroTheme.error).withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Text(
+                                          _currencyFormat.format(totalNetoSemana),
+                                          style: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: totalNetoSemana >= 0 ? primary : AgroTheme.error,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${DateFormat('d MMM').format(lunes)} - ${DateFormat('d MMM').format(domingo.subtract(const Duration(days: 1)))}'
+                                    '${esSemanaActual ? " • Semana Actual" : " • Hace ${-_semanaOffset} sem"}',
+                                    style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            // CONTROLES DE NAVEGACIÓN SEMANAL (< Hoy >)
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
                               children: [
-                                Text(
-                                  'Flujo de Caja Semanal',
-                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: onSurface),
+                                IconButton(
+                                  icon: const Icon(Icons.chevron_left_rounded, size: 22),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                  tooltip: 'Semana anterior',
+                                  onPressed: () {
+                                    setState(() {
+                                      _semanaOffset--;
+                                    });
+                                  },
                                 ),
-                                Text(
-                                  'Semana en curso • Hoy: ${titulosDias[hoyDiaSemana - 1]}',
-                                  style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                                if (!esSemanaActual)
+                                  InkWell(
+                                    onTap: () => setState(() => _semanaOffset = 0),
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: primary.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: Text(
+                                        'Hoy',
+                                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: primary),
+                                      ),
+                                    ),
+                                  ),
+                                IconButton(
+                                  icon: const Icon(Icons.chevron_right_rounded, size: 22),
+                                  padding: EdgeInsets.zero,
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                  tooltip: 'Semana siguiente',
+                                  onPressed: esSemanaActual
+                                      ? null
+                                      : () {
+                                          setState(() {
+                                            _semanaOffset++;
+                                          });
+                                        },
                                 ),
                               ],
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: (flujoNetoPorDia[hoyDiaSemana - 1] >= 0 ? primary : AgroTheme.error).withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                'Hoy: ${_currencyFormat.format(flujoNetoPorDia[hoyDiaSemana - 1])}',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                  color: flujoNetoPorDia[hoyDiaSemana - 1] >= 0 ? primary : AgroTheme.error,
-                                ),
-                              ),
                             ),
                           ],
                         ),
@@ -1277,7 +1823,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                                     getTitlesWidget: (value, meta) {
                                       final index = value.toInt();
                                       if (index >= 0 && index < titulosDias.length) {
-                                        final esHoy = (hoyDiaSemana - 1) == index;
+                                        final esHoy = esSemanaActual && (hoyDiaSemana - 1) == index;
                                         return Padding(
                                           padding: const EdgeInsets.only(top: 4.0),
                                           child: Text(
@@ -1302,7 +1848,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                               borderData: FlBorderData(show: false),
                               barGroups: List.generate(7, (i) {
                                 final neto = flujoNetoPorDia[i];
-                                final esHoy = (hoyDiaSemana - 1) == i;
+                                final esHoy = esSemanaActual && (hoyDiaSemana - 1) == i;
                                 final esPositivo = neto >= 0;
                                 final double toY = neto == 0
                                     ? 0.5
@@ -1316,7 +1862,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                     ),
                   ),
 
-                  const SizedBox(height: 20),
+                  const SizedBox(height: 18),
 
                   // MOVIMIENTOS RECIENTES
                   Row(
@@ -1324,7 +1870,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                     children: [
                       Text(
                         'Historial (${transaccionesFiltradas.length})',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: onSurface),
+                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: onSurface),
                       ),
                       Text(
                         _getTituloPeriodo(),
@@ -1333,107 +1879,22 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                     ],
                   ),
 
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 8),
 
-                  // BUSCADOR EN TIEMPO REAL
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8.0),
-                    child: TextField(
-                      decoration: InputDecoration(
-                        hintText: 'Buscar por concepto, cliente, categoría, banco...',
-                        hintStyle: TextStyle(color: onSurfaceVariant, fontSize: 12),
-                        prefixIcon: Icon(Icons.search, color: onSurfaceVariant, size: 18),
-                        suffixIcon: _busqueda.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear, size: 16),
-                                onPressed: () => setState(() => _busqueda = ''),
-                              )
-                            : null,
-                        filled: true,
-                        fillColor: cardBg,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: borderColor),
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: borderColor),
-                        ),
-                      ),
-                      style: TextStyle(color: onSurface, fontSize: 12),
-                      onChanged: (val) => setState(() => _busqueda = val),
+                  // SELECTOR COMPACTO DE TIPO (TODOS, INGRESOS, EGRESOS)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 8.0),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(10),
                     ),
-                  ),
-
-                  // FILTRO DE TIPO (TODOS, INGRESOS, EGRESOS)
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: ['TODOS', 'INGRESO', 'EGRESO'].map((tipo) {
-                        final sel = _filtroTipo == tipo;
-                        final label = tipo == 'TODOS' ? 'Todos los Tipos' : (tipo == 'INGRESO' ? 'Solo Ingresos' : 'Solo Egresos');
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 8.0),
-                          child: ChoiceChip(
-                            label: Text(label),
-                            selected: sel,
-                            selectedColor: primary.withValues(alpha: 0.2),
-                            backgroundColor: cardBg,
-                            labelStyle: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: sel ? primary : onSurfaceVariant,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.4)),
-                            ),
-                            onSelected: (val) {
-                              if (val) setState(() => _filtroTipo = tipo);
-                            },
-                          ),
-                        );
-                      }).toList(),
-                    ),
-                  ),
-
-                  const SizedBox(height: 6),
-
-                  // FILTRO DE CUENTAS / BANCOS DE COLOMBIA
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.all(3),
                     child: Row(
                       children: [
-                        'TODAS', 'EFECTIVO', 'BANCOLOMBIA', 'NEQUI', 'DAVIPLATA', 'DAVIVIENDA', 'BANCO_BOGOTA', 'BBVA', 'PSE'
-                      ].map((cuentaKey) {
-                        final sel = _filtroCuenta == cuentaKey;
-                        final label = cuentaKey == 'TODAS'
-                            ? 'Todas las Cuentas'
-                            : TransaccionModel.nombreMetodo(cuentaKey);
-                        return Padding(
-                          padding: const EdgeInsets.only(right: 6.0),
-                          child: FilterChip(
-                            label: Text(label),
-                            selected: sel,
-                            showCheckmark: false,
-                            selectedColor: primary.withValues(alpha: 0.18),
-                            backgroundColor: cardBg,
-                            labelStyle: TextStyle(
-                              fontSize: 10,
-                              fontWeight: sel ? FontWeight.bold : FontWeight.normal,
-                              color: sel ? primary : onSurfaceVariant,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.3)),
-                            ),
-                            onSelected: (val) {
-                              setState(() => _filtroCuenta = val ? cuentaKey : 'TODAS');
-                            },
-                          ),
-                        );
-                      }).toList(),
+                        _buildSegmentButton('TODOS', 'Todos (${transaccionesFiltradas.length})', primary, onSurface, onSurfaceVariant),
+                        _buildSegmentButton('INGRESO', '🟢 Ingresos', primary, onSurface, onSurfaceVariant),
+                        _buildSegmentButton('EGRESO', '🔴 Egresos', primary, onSurface, onSurfaceVariant),
+                      ],
                     ),
                   ),
 

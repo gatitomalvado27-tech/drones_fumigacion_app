@@ -1,0 +1,16 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Carpeta pública para descargas de actualizaciones de la app
+    match /releases/{allPaths=**} {
+      allow read: if true;
+      allow write: if true; // O restringido a administradores
+    }
+
+    // El resto de archivos requiere autenticación
+    match /{allPaths=**} {
+      allow read, write: if true;
+    }
+  }
+}

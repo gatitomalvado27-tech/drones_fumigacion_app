@@ -893,10 +893,16 @@ class _DashboardScreenState extends State<DashboardScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('PIN Actual Configurado:', style: TextStyle(fontSize: 13, color: subtext)),
-                  Text(
-                    '•••• ($pinActual)',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: primary),
+                  Text('Protección por PIN:', style: TextStyle(fontSize: 13, color: subtext)),
+                  Row(
+                    children: [
+                      Icon(Icons.lock, size: 14, color: primary),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Activo (••••)',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: primary),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -945,12 +951,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ),
                 child: Icon(Icons.key, color: primary, size: 20),
               ),
-              title: Text('Cambiar PIN Familiar', style: TextStyle(color: text, fontWeight: FontWeight.bold)),
-              subtitle: Text('Modificar la clave de 4 dígitos de la app', style: TextStyle(color: subtext, fontSize: 12)),
+              title: Text('Cambiar PIN de Acceso', style: TextStyle(color: text, fontWeight: FontWeight.bold)),
+              subtitle: Text('Requiere ingresar el PIN actual por seguridad', style: TextStyle(color: subtext, fontSize: 12)),
               trailing: Icon(Icons.arrow_forward_ios, size: 14, color: subtext),
               onTap: () {
                 Navigator.pop(ctx);
-                _mostrarDialogoCambiarPin(context);
+                _mostrarDialogoCambiarPin(context, pinActual);
               },
             ),
             Divider(color: border.withValues(alpha: 0.5)),
@@ -982,55 +988,144 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _mostrarDialogoCambiarPin(BuildContext context) {
+  void _mostrarDialogoCambiarPin(BuildContext context, String pinActualConfigurado) {
+    String pinActualIngresado = '';
     String nuevoPin = '';
+    String confirmarPin = '';
+    String? errorLocal;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Nuevo PIN Familiar'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Ingresa el nuevo código de 4 dígitos para autorizar celulares en la empresa:',
-              style: TextStyle(fontSize: 13, color: AgroTheme.getSubtext(context)),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              autofocus: true,
-              keyboardType: TextInputType.number,
-              maxLength: 4,
-              obscureText: true,
-              style: TextStyle(fontSize: 22, letterSpacing: 10, fontWeight: FontWeight.bold, color: AgroTheme.getPrimary(context)),
-              textAlign: TextAlign.center,
-              decoration: const InputDecoration(
-                counterText: '',
-                hintText: '••••',
-              ),
-              onChanged: (val) => nuevoPin = val,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.shield_outlined, size: 22, color: AgroTheme.primary),
+              SizedBox(width: 8),
+              Text('Cambiar PIN', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+            ],
           ),
-          ElevatedButton(
-            onPressed: () async {
-              if (nuevoPin.length == 4) {
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'PIN Actual:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                TextField(
+                  keyboardType: TextInputType.number,
+                  maxLength: 4,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    hintText: 'PIN actual',
+                    counterText: '',
+                    prefixIcon: Icon(Icons.lock_clock, size: 18),
+                  ),
+                  onChanged: (val) {
+                    pinActualIngresado = val;
+                    if (errorLocal != null) setModalState(() => errorLocal = null);
+                  },
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Nuevo PIN (4 dígitos):',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                TextField(
+                  keyboardType: TextInputType.number,
+                  maxLength: 4,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Nuevo PIN',
+                    counterText: '',
+                    prefixIcon: Icon(Icons.pin, size: 18),
+                  ),
+                  onChanged: (val) {
+                    nuevoPin = val;
+                    if (errorLocal != null) setModalState(() => errorLocal = null);
+                  },
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Confirmar Nuevo PIN:',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 4),
+                TextField(
+                  keyboardType: TextInputType.number,
+                  maxLength: 4,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Repite el nuevo PIN',
+                    counterText: '',
+                    prefixIcon: Icon(Icons.check_circle_outline, size: 18),
+                  ),
+                  onChanged: (val) {
+                    confirmarPin = val;
+                    if (errorLocal != null) setModalState(() => errorLocal = null);
+                  },
+                ),
+                if (errorLocal != null) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: AgroTheme.error.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      errorLocal!,
+                      style: const TextStyle(fontSize: 11.5, color: AgroTheme.error, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancelar'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AgroTheme.primary,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () async {
+                if (pinActualIngresado != pinActualConfigurado) {
+                  setModalState(() => errorLocal = 'El PIN actual no es correcto.');
+                  return;
+                }
+                if (nuevoPin.length != 4) {
+                  setModalState(() => errorLocal = 'El nuevo PIN debe tener exactamente 4 dígitos.');
+                  return;
+                }
+                if (nuevoPin != confirmarPin) {
+                  setModalState(() => errorLocal = 'La confirmación del PIN no coincide.');
+                  return;
+                }
+
                 final prefs = await SharedPreferences.getInstance();
                 await prefs.setString('proicaro_pin_personalizado', nuevoPin);
                 if (!ctx.mounted) return;
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('¡PIN familiar actualizado con éxito!')),
+                  const SnackBar(
+                    content: Text('¡PIN de acceso actualizado con éxito!'),
+                    backgroundColor: AgroTheme.primary,
+                  ),
                 );
-              }
-            },
-            child: const Text('Guardar'),
-          ),
-        ],
+              },
+              child: const Text('Guardar'),
+            ),
+          ],
+        ),
       ),
     );
   }
