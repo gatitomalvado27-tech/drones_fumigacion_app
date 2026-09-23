@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "901424403199",
+    "project_id": "icaroproagro-612d3",
+    "storage_bucket": "icaroproagro-612d3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:901424403199:android:5c2400e07bf717921df2ca",
+        "android_client_info": {
+          "package_name": "com.example.drones_fumigacion_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "901424403199-0o1f0n9ebhsa1vbai92b6hpa898q6liv.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCXhC02lkkYwooAxYM0Tz3jL8Jbp3mOwnI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "901424403199-0o1f0n9ebhsa1vbai92b6hpa898q6liv.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

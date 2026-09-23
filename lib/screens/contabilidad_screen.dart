@@ -1,0 +1,3003 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:intl/intl.dart';
+import 'package:fl_chart/fl_chart.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../theme/agro_theme.dart';
+import '../models/transaccion_model.dart';
+import '../models/servicio_model.dart';
+import '../services/pdf_service.dart';
+import '../services/notification_service.dart';
+import '../utils/crop_helper.dart';
+import 'historial_balances_screen.dart';
+
+class ContabilidadScreen extends StatefulWidget {
+  const ContabilidadScreen({super.key});
+
+  @override
+  State<ContabilidadScreen> createState() => _ContabilidadScreenState();
+}
+
+class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
+  String _filtroTipo = 'TODOS'; // 'TODOS', 'INGRESO', 'EGRESO', 'DEUDA'
+  String _filtroPeriodo = 'ESTE_MES'; // 'HOY', 'ESTA_SEMANA', 'ESTE_MES', 'MES_PASADO', 'ESTE_ANO', 'TODO', 'PERSONALIZADO'
+  String _filtroJornada = 'TODO'; // 'TODO', 'MANANA', 'TARDE'
+  String _filtroCuenta = 'TODAS'; // 'TODAS', 'EFECTIVO', 'BANCOLOMBIA', 'NEQUI', etc.
+  String _busqueda = '';
+  DateTimeRange? _rangoPersonalizado;
+
+  final NumberFormat _currencyFormat = NumberFormat.currency(
+    locale: 'es_CO',
+    symbol: '\$',
+    decimalDigits: 0,
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
+
+  bool _estaEnPeriodo(DateTime fecha) {
+    final now = DateTime.now();
+
+    // Filtro horario / jornada (Mañana vs Tarde)
+    if (_filtroJornada == 'MANANA') {
+      if (fecha.hour < 5 || fecha.hour >= 12) return false;
+    } else if (_filtroJornada == 'TARDE') {
+      if (fecha.hour < 12 || fecha.hour >= 19) return false;
+    }
+
+    // Filtro temporal
+    if (_filtroPeriodo == 'HOY') {
+      return fecha.year == now.year && fecha.month == now.month && fecha.day == now.day;
+    } else if (_filtroPeriodo == 'ESTA_SEMANA') {
+      final inicioSemana = now.subtract(Duration(days: now.weekday - 1));
+      final lunes = DateTime(inicioSemana.year, inicioSemana.month, inicioSemana.day);
+      final domingo = lunes.add(const Duration(days: 7));
+      return fecha.isAfter(lunes.subtract(const Duration(seconds: 1))) && fecha.isBefore(domingo);
+    } else if (_filtroPeriodo == 'ESTE_MES') {
+      return fecha.year == now.year && fecha.month == now.month;
+    } else if (_filtroPeriodo == 'MES_PASADO') {
+      final prev = DateTime(now.year, now.month - 1, 1);
+      return fecha.year == prev.year && fecha.month == prev.month;
+    } else if (_filtroPeriodo == 'ESTE_ANO') {
+      return fecha.year == now.year;
+    } else if (_filtroPeriodo == 'PERSONALIZADO' && _rangoPersonalizado != null) {
+      final start = DateTime(_rangoPersonalizado!.start.year, _rangoPersonalizado!.start.month, _rangoPersonalizado!.start.day);
+      final end = DateTime(_rangoPersonalizado!.end.year, _rangoPersonalizado!.end.month, _rangoPersonalizado!.end.day, 23, 59, 59);
+      return fecha.isAfter(start.subtract(const Duration(seconds: 1))) && fecha.isBefore(end.add(const Duration(seconds: 1)));
+    }
+    return true; // 'TODO'
+  }
+
+  String _getTituloPeriodo() {
+    if (_filtroPeriodo == 'HOY') return 'Rendimiento de Hoy';
+    if (_filtroPeriodo == 'ESTA_SEMANA') return 'Rendimiento de Esta Semana';
+    if (_filtroPeriodo == 'ESTE_MES') return 'Rendimiento de Este Mes';
+    if (_filtroPeriodo == 'MES_PASADO') return 'Rendimiento del Mes Pasado';
+    if (_filtroPeriodo == 'ESTE_ANO') return 'Rendimiento de Este Año (${DateTime.now().year})';
+    if (_filtroPeriodo == 'PERSONALIZADO' && _rangoPersonalizado != null) {
+      return 'Rango: ${DateFormat('dd/MM').format(_rangoPersonalizado!.start)} - ${DateFormat('dd/MM').format(_rangoPersonalizado!.end)}';
+    }
+    return 'Rendimiento Histórico Total';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final onSurfaceVariant = Theme.of(context).colorScheme.onSurfaceVariant;
+    final cardBg = Theme.of(context).colorScheme.surface;
+    final borderColor = Theme.of(context).colorScheme.outlineVariant;
+
+    return Scaffold(
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      body: SafeArea(
+        child: Column(
+          children: [
+            // HEADER
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 10.0),
+              child: Row(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        color: cardBg,
+                        border: Border.all(color: primary.withValues(alpha: 0.5), width: 1.5),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Image.asset(
+                        'assets/icon/app_icon.png',
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Contabilidad',
+                          style: TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.bold,
+                            color: onSurface,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Text(
+                          'Patrimonio y Finanzas',
+                          style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: primary.withValues(alpha: 0.8)),
+                      backgroundColor: primary.withValues(alpha: 0.1),
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    icon: Icon(Icons.picture_as_pdf, size: 14, color: primary),
+                    label: Text(
+                      'PDF',
+                      style: TextStyle(color: primary, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                    onPressed: () => _generarBalanceMensual(context),
+                  ),
+                  const SizedBox(width: 4),
+                  IconButton(
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    padding: const EdgeInsets.all(6),
+                    tooltip: 'Historial de Balances',
+                    icon: Icon(Icons.history_edu, color: primary, size: 20),
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const HistorialBalancesScreen()),
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 2),
+                  IconButton(
+                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                    padding: const EdgeInsets.all(6),
+                    tooltip: 'Exportar a Excel / Sheets',
+                    icon: Icon(Icons.table_chart, color: primary, size: 20),
+                    onPressed: () => _mostrarDialogoExportarExcel(context),
+                  ),
+                ],
+              ),
+            ),
+
+            // FILTRO TEMPORAL
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 2.0),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildPeriodoChip('HOY', 'Hoy', primary, onSurfaceVariant, cardBg, borderColor),
+                    _buildPeriodoChip('ESTA_SEMANA', 'Esta Semana', primary, onSurfaceVariant, cardBg, borderColor),
+                    _buildPeriodoChip('ESTE_MES', 'Este Mes', primary, onSurfaceVariant, cardBg, borderColor),
+                    _buildPeriodoChip('MES_PASADO', 'Mes Pasado', primary, onSurfaceVariant, cardBg, borderColor),
+                    _buildPeriodoChip('ESTE_ANO', 'Este Año', primary, onSurfaceVariant, cardBg, borderColor),
+                    _buildPeriodoChip('TODO', 'Histórico', primary, onSurfaceVariant, cardBg, borderColor),
+                    _buildPeriodoChip('PERSONALIZADO', _rangoPersonalizado != null
+                        ? '${DateFormat('dd/MM').format(_rangoPersonalizado!.start)} - ${DateFormat('dd/MM').format(_rangoPersonalizado!.end)}'
+                        : '📅 Rango...', primary, onSurfaceVariant, cardBg, borderColor),
+                  ],
+                ),
+              ),
+            ),
+
+            // FILTRO DE FRANJA HORARIA / JORNADA (MAÑANA VS TARDE)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 2.0),
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildJornadaChip('TODO', 'Todo el día', Icons.access_time),
+                    _buildJornadaChip('MANANA', '☀️ Mañana (5am-12pm)', Icons.wb_twilight),
+                    _buildJornadaChip('TARDE', '⛅ Tarde (12pm-7pm)', Icons.wb_cloudy_outlined),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            // TAB BAR ESTILO STITCH
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 20.0),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: TabBar(
+                controller: _tabController,
+                labelColor: Colors.black,
+                unselectedLabelColor: onSurfaceVariant,
+                indicator: BoxDecoration(
+                  color: primary,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                indicatorSize: TabBarIndicatorSize.tab,
+                dividerColor: Colors.transparent,
+                labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                tabs: const [
+                  Tab(text: 'Balance y Patrimonio'),
+                  Tab(text: 'Cuentas por Cobrar'),
+                ],
+              ),
+            ),
+
+            const SizedBox(height: 10),
+
+            // CONTENIDO DE PESTAÑAS
+            Expanded(
+              child: TabBarView(
+                controller: _tabController,
+                children: [
+                  _buildMovimientosTab(cardBg, primary, onSurface, onSurfaceVariant, borderColor),
+                  _buildCuentasPorCobrarTab(cardBg, primary, onSurface, onSurfaceVariant, borderColor),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        backgroundColor: primary,
+        foregroundColor: Colors.black,
+        onPressed: () => _mostrarDialogoEditarTransaccion(context, null),
+        icon: const Icon(Icons.add),
+        label: const Text('Registrar Movimiento', style: TextStyle(fontWeight: FontWeight.bold)),
+      ),
+    );
+  }
+
+  Widget _buildPeriodoChip(String key, String label, Color primary, Color onSurfaceVariant, Color cardBg, Color borderColor) {
+    final sel = _filtroPeriodo == key;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8.0),
+      child: ChoiceChip(
+        label: Text(label),
+        selected: sel,
+        selectedColor: primary.withValues(alpha: 0.2),
+        backgroundColor: cardBg,
+        labelStyle: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: sel ? primary : onSurfaceVariant,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.4)),
+        ),
+        onSelected: (val) async {
+          if (key == 'PERSONALIZADO') {
+            final picked = await showDateRangePicker(
+              context: context,
+              firstDate: DateTime(2023),
+              lastDate: DateTime(2030),
+              initialDateRange: _rangoPersonalizado ?? DateTimeRange(
+                start: DateTime.now().subtract(const Duration(days: 7)),
+                end: DateTime.now(),
+              ),
+            );
+            if (picked != null) {
+              setState(() {
+                _rangoPersonalizado = picked;
+                _filtroPeriodo = 'PERSONALIZADO';
+              });
+            }
+          } else {
+            if (val) setState(() => _filtroPeriodo = key);
+          }
+        },
+      ),
+    );
+  }
+
+  Widget _buildJornadaChip(String key, String label, IconData icon) {
+    final sel = _filtroJornada == key;
+    final primary = Theme.of(context).colorScheme.primary;
+    final onSurfaceVariant = Theme.of(context).colorScheme.onSurfaceVariant;
+    final cardBg = Theme.of(context).colorScheme.surface;
+    final borderColor = Theme.of(context).colorScheme.outlineVariant;
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 8.0),
+      child: FilterChip(
+        avatar: Icon(icon, size: 13, color: sel ? primary : onSurfaceVariant),
+        label: Text(label),
+        selected: sel,
+        showCheckmark: false,
+        selectedColor: primary.withValues(alpha: 0.15),
+        backgroundColor: cardBg,
+        labelStyle: TextStyle(
+          fontSize: 10.5,
+          fontWeight: sel ? FontWeight.bold : FontWeight.w500,
+          color: sel ? primary : onSurfaceVariant,
+        ),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.3)),
+        ),
+        onSelected: (val) {
+          setState(() => _filtroJornada = val ? key : 'TODO');
+        },
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // TAB 1: MOVIMIENTOS, PATRIMONIO Y BALANCE VISUAL EN GRANDE
+  // ---------------------------------------------------------------------------
+  Widget _buildMovimientosTab(Color cardBg, Color primary, Color onSurface, Color onSurfaceVariant, Color borderColor) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('servicios').snapshots(),
+      builder: (context, snapServicios) {
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance.collection('transacciones').snapshots(),
+          builder: (context, snapTransacciones) {
+            if (snapTransacciones.connectionState == ConnectionState.waiting ||
+                snapServicios.connectionState == ConnectionState.waiting) {
+              return Center(child: CircularProgressIndicator(color: primary));
+            }
+
+            // Datos de Transacciones filtradas por período
+            final docsTrans = snapTransacciones.data?.docs ?? [];
+            final todasTrans = docsTrans.map((doc) {
+              return TransaccionModel.fromMap(doc.id, doc.data() as Map<String, dynamic>);
+            }).toList();
+            todasTrans.sort((a, b) => b.fecha.compareTo(a.fecha));
+
+            final transaccionesEnPeriodo = todasTrans.where((t) => _estaEnPeriodo(t.fecha)).toList();
+
+            double totalIngresos = 0;
+            double totalIngresosEfectivo = 0;
+            double totalIngresosLinea = 0;
+            int transaccionesIngresoCount = 0;
+            double totalEgresos = 0;
+            int transaccionesEgresoCount = 0;
+            final Map<String, double> egresosPorCat = {};
+            final Map<String, int> egresosConteoPorCat = {};
+
+            for (var t in transaccionesEnPeriodo) {
+              if (t.tipo == 'INGRESO') {
+                totalIngresos += t.monto;
+                transaccionesIngresoCount++;
+                if (t.metodoPago == 'EN_LINEA') {
+                  totalIngresosLinea += t.monto;
+                } else {
+                  totalIngresosEfectivo += t.monto;
+                }
+              }
+              if (t.tipo == 'EGRESO') {
+                totalEgresos += t.monto;
+                transaccionesEgresoCount++;
+                egresosPorCat[t.categoria] = (egresosPorCat[t.categoria] ?? 0) + t.monto;
+                egresosConteoPorCat[t.categoria] = (egresosConteoPorCat[t.categoria] ?? 0) + 1;
+              }
+            }
+
+            // Datos de Servicios (Hectáreas y Cuentas por Cobrar) filtradas por período
+            final docsServ = snapServicios.data?.docs ?? [];
+            final todosServ = docsServ.map((doc) {
+              return ServicioModel.fromMap(doc.id, doc.data() as Map<String, dynamic>);
+            }).toList();
+
+            final serviciosEnPeriodo = todosServ.where((s) => _estaEnPeriodo(s.fecha)).toList();
+
+            double totalHa = 0;
+            double totalPorCobrar = 0;
+            int serviciosPendientes = 0;
+            int serviciosPagados = 0;
+
+            for (var s in serviciosEnPeriodo) {
+              if (s.estado != 'CANCELADO') {
+                totalHa += s.hectareas;
+                if (!s.pagado) {
+                  totalPorCobrar += s.saldoPendiente;
+                  serviciosPendientes++;
+                } else {
+                  serviciosPagados++;
+                }
+              }
+            }
+
+            final double cajaLiquidaReal = totalIngresos - totalEgresos;
+            final double patrimonioReal = cajaLiquidaReal + totalPorCobrar;
+            final double totalCartera = totalIngresos + totalPorCobrar;
+            final double porcentajeCobrado = totalCartera > 0
+                ? (totalIngresos / totalCartera).clamp(0.0, 1.0)
+                : 1.0;
+
+            // Métricas de Rentabilidad Neta
+            final double margenNeto = cajaLiquidaReal;
+            final double margenPorcentaje = totalIngresos > 0 ? ((margenNeto / totalIngresos) * 100) : 0.0;
+            final double rentabilidadPorHa = totalHa > 0 ? (margenNeto / totalHa) : 0.0;
+            final double costoPorHa = totalHa > 0 ? (totalEgresos / totalHa) : 0.0;
+
+            final transaccionesFiltradas = transaccionesEnPeriodo.where((t) {
+              if (_filtroTipo != 'TODOS' && t.tipo != _filtroTipo) return false;
+              if (_filtroCuenta != 'TODAS') {
+                if (_filtroCuenta == 'EFECTIVO' && !t.esEfectivo) return false;
+                if (_filtroCuenta != 'EFECTIVO' && t.metodoPago != _filtroCuenta) return false;
+              }
+              if (_busqueda.isNotEmpty) {
+                final q = _busqueda.toLowerCase();
+                final matchDesc = t.descripcion.toLowerCase().contains(q);
+                final matchCat = t.categoria.toLowerCase().contains(q);
+                final matchCliente = (t.clienteNombre ?? '').toLowerCase().contains(q);
+                final matchBanco = TransaccionModel.nombreMetodo(t.metodoPago).toLowerCase().contains(q);
+                return matchDesc || matchCat || matchCliente || matchBanco;
+              }
+              return true;
+            }).toList();
+
+            // Flujo Semanal Dinámico (Lunes a Domingo de la semana actual)
+            final now = DateTime.now();
+            final hoyDiaSemana = now.weekday; // 1 = Lunes, ..., 7 = Domingo
+            final inicioSemana = now.subtract(Duration(days: hoyDiaSemana - 1));
+            final lunes = DateTime(inicioSemana.year, inicioSemana.month, inicioSemana.day);
+            final domingo = lunes.add(const Duration(days: 7));
+
+            final List<String> titulosDias = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+            final List<double> flujoNetoPorDia = List.filled(7, 0.0);
+            final List<double> ingresosPorDia = List.filled(7, 0.0);
+            final List<double> egresosPorDia = List.filled(7, 0.0);
+
+            for (var t in todasTrans) {
+              if (t.fecha.isAfter(lunes.subtract(const Duration(seconds: 1))) && t.fecha.isBefore(domingo)) {
+                final diaIdx = t.fecha.weekday - 1; // 0..6
+                if (diaIdx >= 0 && diaIdx < 7) {
+                  if (t.tipo == 'INGRESO') {
+                    ingresosPorDia[diaIdx] += t.monto;
+                    flujoNetoPorDia[diaIdx] += t.monto;
+                  } else if (t.tipo == 'EGRESO') {
+                    egresosPorDia[diaIdx] += t.monto;
+                    flujoNetoPorDia[diaIdx] -= t.monto;
+                  }
+                }
+              }
+            }
+
+            final maxFlujo = flujoNetoPorDia.map((e) => e.abs()).fold<double>(1.0, (p, e) => e > p ? e : p);
+
+            return SingleChildScrollView(
+              padding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 8.0, bottom: 95.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // TÍTULO DE PERÍODO ACTIVO
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _getTituloPeriodo(),
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: primary),
+                      ),
+                      Text(
+                        '${serviciosEnPeriodo.length} vuelos en período',
+                        style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 8),
+
+                  // HERO CARD 1: PATRIMONIO REAL DE LA EMPRESA
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: primary.withValues(alpha: 0.7),
+                        width: 1.5,
+                      ),
+                      boxShadow: AgroTheme.getShadow(context),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.account_balance, color: primary, size: 20),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'PATRIMONIO REAL',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.2,
+                                    color: primary,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: primary.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                'Caja + Por Cobrar',
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: primary),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _currencyFormat.format(patrimonioReal),
+                          style: TextStyle(
+                            fontSize: 34,
+                            fontWeight: FontWeight.w900,
+                            color: onSurface,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Valor neto operacional • ${totalHa.toStringAsFixed(1)} Ha voladas acumuladas',
+                          style: TextStyle(fontSize: 12, color: onSurfaceVariant),
+                        ),
+                        const Divider(height: 24),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: BoxDecoration(color: primary, shape: BoxShape.circle),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text('Caja Disponible', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _currencyFormat.format(cajaLiquidaReal),
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: cajaLiquidaReal >= 0 ? primary : AgroTheme.error,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(width: 1, height: 32, color: borderColor),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Container(
+                                        width: 8,
+                                        height: 8,
+                                        decoration: const BoxDecoration(color: Colors.orangeAccent, shape: BoxShape.circle),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      Text('Por Cobrar', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    _currencyFormat.format(totalPorCobrar),
+                                    style: const TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.orangeAccent,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // HERO CARD: MÉTRICAS DE RENTABILIDAD NETA
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: (margenNeto >= 0 ? Colors.green : Colors.red).withValues(alpha: 0.6),
+                        width: 1.5,
+                      ),
+                      boxShadow: AgroTheme.getShadow(context),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.trending_up, color: margenNeto >= 0 ? Colors.green : Colors.red, size: 20),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'RENTABILIDAD NETA',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.2,
+                                    color: margenNeto >= 0 ? Colors.green : Colors.red,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: (margenNeto >= 0 ? Colors.green : Colors.red).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                '${margenPorcentaje.toStringAsFixed(1)}% Margen Neto',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: margenNeto >= 0 ? Colors.green : Colors.red,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          _currencyFormat.format(margenNeto),
+                          style: TextStyle(
+                            fontSize: 30,
+                            fontWeight: FontWeight.w900,
+                            color: margenNeto >= 0
+                                ? (Theme.of(context).brightness == Brightness.dark
+                                    ? Colors.greenAccent
+                                    : const Color(0xFF1B5E20))
+                                : Colors.red,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Ganancia real en caja (Ingresos cobrados - Gastos operativos)',
+                          style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                        ),
+                        const Divider(height: 20),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Utilidad / Ha', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _currencyFormat.format(rentabilidadPorHa),
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: rentabilidadPorHa >= 0 ? primary : Colors.red,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(width: 1, height: 28, color: borderColor),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Costo Op. / Ha', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _currencyFormat.format(costoPorHa),
+                                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.orangeAccent),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(width: 1, height: 28, color: borderColor),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Margen Operativo', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${margenPorcentaje.toStringAsFixed(0)}%',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: margenPorcentaje >= 30 ? Colors.green : Colors.orangeAccent,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // HERO CARD 2: INGRESO COBRADO VS CUÁNTO SE DEBE
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: borderColor.withValues(alpha: 0.5)),
+                      boxShadow: AgroTheme.getShadow(context),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Cobrado vs Cuánto se Debe',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: onSurface,
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: primary.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '${(porcentajeCobrado * 100).toStringAsFixed(0)}% Efectivo',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: primary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.25),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: primary.withValues(alpha: 0.3)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(Icons.check_circle_outline, color: primary, size: 16),
+                                        const SizedBox(width: 4),
+                                        Text('Ingresos Cobrados', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      _currencyFormat.format(totalIngresos),
+                                      style: TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w900,
+                                        color: primary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '$serviciosPagados vuelos pagados',
+                                      style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.25),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.3)),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Row(
+                                      children: [
+                                        Icon(Icons.hourglass_top, color: Colors.orangeAccent, size: 16),
+                                        SizedBox(width: 4),
+                                        Text('Cuánto se Debe', style: TextStyle(fontSize: 11, color: Colors.orangeAccent)),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      _currencyFormat.format(totalPorCobrar),
+                                      style: const TextStyle(
+                                        fontSize: 20,
+                                        fontWeight: FontWeight.w900,
+                                        color: Colors.orangeAccent,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '$serviciosPendientes por cobrar',
+                                      style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 14),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: SizedBox(
+                            height: 10,
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  flex: (porcentajeCobrado * 100).toInt().clamp(1, 100),
+                                  child: Container(color: primary),
+                                ),
+                                Expanded(
+                                  flex: ((1.0 - porcentajeCobrado) * 100).toInt().clamp(0, 100),
+                                  child: Container(color: Colors.orangeAccent),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Cobrado: ${(porcentajeCobrado * 100).toStringAsFixed(1)}%',
+                              style: TextStyle(fontSize: 10, color: onSurfaceVariant),
+                            ),
+                            Text(
+                              'Pendiente: ${((1.0 - porcentajeCobrado) * 100).toStringAsFixed(1)}%',
+                              style: TextStyle(fontSize: 10, color: onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // RESUMEN Y TOTALES DE INGRESOS
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: primary.withValues(alpha: 0.35)),
+                      boxShadow: AgroTheme.getShadow(context),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: primary.withValues(alpha: 0.15),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(Icons.trending_up, color: primary, size: 22),
+                                ),
+                                const SizedBox(width: 12),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Total Ingresos Recaudados', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
+                                    Text(
+                                      _currencyFormat.format(totalIngresos),
+                                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: primary),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: primary.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '$transaccionesIngresoCount cobros',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: primary),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        const Divider(height: 1),
+                        const SizedBox(height: 10),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text('💵', style: TextStyle(fontSize: 12)),
+                                      const SizedBox(width: 4),
+                                      Text('Efectivo', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _currencyFormat.format(totalIngresosEfectivo),
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: onSurface),
+                                  ),
+                                  if (totalIngresos > 0)
+                                    Text(
+                                      '${(totalIngresosEfectivo / totalIngresos * 100).toStringAsFixed(0)}% del total',
+                                      style: TextStyle(fontSize: 10, color: onSurfaceVariant),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            Container(width: 1, height: 28, color: borderColor),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Text('💳', style: TextStyle(fontSize: 12)),
+                                      const SizedBox(width: 4),
+                                      Text('Transferencia / Línea', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    _currencyFormat.format(totalIngresosLinea),
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: onSurface),
+                                  ),
+                                  if (totalIngresos > 0)
+                                    Text(
+                                      '${(totalIngresosLinea / totalIngresos * 100).toStringAsFixed(0)}% del total',
+                                      style: TextStyle(fontSize: 10, color: onSurfaceVariant),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // RESUMEN Y DESGLOSE DE EGRESOS POR CATEGORÍA
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: AgroTheme.error.withValues(alpha: 0.35)),
+                      boxShadow: AgroTheme.getShadow(context),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(10),
+                                  decoration: BoxDecoration(
+                                    color: AgroTheme.error.withValues(alpha: 0.15),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.trending_down, color: AgroTheme.error, size: 22),
+                                ),
+                                const SizedBox(width: 12),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Total Gastos / Egresos', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
+                                    Text(
+                                      _currencyFormat.format(totalEgresos),
+                                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AgroTheme.error),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: AgroTheme.error.withValues(alpha: 0.5)),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              icon: const Icon(Icons.add, size: 14, color: AgroTheme.error),
+                              label: const Text('Gasto', style: TextStyle(color: AgroTheme.error, fontSize: 12)),
+                              onPressed: () => _mostrarDialogoGastoRapido(context),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        const Divider(height: 1),
+                        const SizedBox(height: 10),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              'Desglose por Categorías de Egreso',
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: onSurface),
+                            ),
+                            Text(
+                              '$transaccionesEgresoCount gastos',
+                              style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        if (egresosPorCat.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 8.0),
+                            child: Text(
+                              'No se registran egresos en el período seleccionado.',
+                              style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: onSurfaceVariant),
+                            ),
+                          )
+                        else
+                          Column(
+                            children: egresosPorCat.entries.map((entry) {
+                              final cat = entry.key;
+                              final monto = entry.value;
+                              final pct = totalEgresos > 0 ? (monto / totalEgresos) : 0.0;
+                              final conteo = egresosConteoPorCat[cat] ?? 1;
+
+                              return Padding(
+                                padding: const EdgeInsets.symmetric(vertical: 6.0),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Icon(_getIconoCategoria(cat), size: 15, color: onSurfaceVariant),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              cat,
+                                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: onSurface),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Text(
+                                              '($conteo)',
+                                              style: TextStyle(fontSize: 10, color: onSurfaceVariant),
+                                            ),
+                                          ],
+                                        ),
+                                        Row(
+                                          children: [
+                                            Text(
+                                              _currencyFormat.format(monto),
+                                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: onSurface),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                              decoration: BoxDecoration(
+                                                color: AgroTheme.error.withValues(alpha: 0.1),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                '${(pct * 100).toStringAsFixed(1)}%',
+                                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AgroTheme.error),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 4),
+                                    ClipRRect(
+                                      borderRadius: BorderRadius.circular(3),
+                                      child: LinearProgressIndicator(
+                                        value: pct,
+                                        minHeight: 4,
+                                        backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                        valueColor: const AlwaysStoppedAnimation<Color>(AgroTheme.error),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 18),
+
+                  // GRÁFICA DE RENDIMIENTO DINÁMICA
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: borderColor.withValues(alpha: 0.4)),
+                      boxShadow: AgroTheme.getShadow(context),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Flujo de Caja Semanal',
+                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: onSurface),
+                                ),
+                                Text(
+                                  'Semana en curso • Hoy: ${titulosDias[hoyDiaSemana - 1]}',
+                                  style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                                ),
+                              ],
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: (flujoNetoPorDia[hoyDiaSemana - 1] >= 0 ? primary : AgroTheme.error).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                'Hoy: ${_currencyFormat.format(flujoNetoPorDia[hoyDiaSemana - 1])}',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: flujoNetoPorDia[hoyDiaSemana - 1] >= 0 ? primary : AgroTheme.error,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 18),
+                        SizedBox(
+                          height: 130,
+                          child: BarChart(
+                            BarChartData(
+                              alignment: BarChartAlignment.spaceAround,
+                              maxY: 10,
+                              minY: 0,
+                              barTouchData: BarTouchData(
+                                enabled: true,
+                                touchTooltipData: BarTouchTooltipData(
+                                  getTooltipColor: (group) => cardBg,
+                                  tooltipBorder: BorderSide(color: borderColor),
+                                  getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                                    final dia = titulosDias[group.x];
+                                    final neto = flujoNetoPorDia[group.x];
+                                    final ing = ingresosPorDia[group.x];
+                                    final egr = egresosPorDia[group.x];
+                                    return BarTooltipItem(
+                                      '$dia\nNeto: ${_currencyFormat.format(neto)}\n(+${_currencyFormat.format(ing)} / -${_currencyFormat.format(egr)})',
+                                      TextStyle(
+                                        color: neto >= 0 ? primary : AgroTheme.error,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 10,
+                                      ),
+                                    );
+                                  },
+                                ),
+                              ),
+                              titlesData: FlTitlesData(
+                                show: true,
+                                bottomTitles: AxisTitles(
+                                  sideTitles: SideTitles(
+                                    showTitles: true,
+                                    getTitlesWidget: (value, meta) {
+                                      final index = value.toInt();
+                                      if (index >= 0 && index < titulosDias.length) {
+                                        final esHoy = (hoyDiaSemana - 1) == index;
+                                        return Padding(
+                                          padding: const EdgeInsets.only(top: 4.0),
+                                          child: Text(
+                                            titulosDias[index],
+                                            style: TextStyle(
+                                              color: esHoy ? primary : onSurfaceVariant,
+                                              fontWeight: esHoy ? FontWeight.bold : FontWeight.normal,
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                      return const SizedBox.shrink();
+                                    },
+                                  ),
+                                ),
+                                leftTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                              ),
+                              gridData: const FlGridData(show: false),
+                              borderData: FlBorderData(show: false),
+                              barGroups: List.generate(7, (i) {
+                                final neto = flujoNetoPorDia[i];
+                                final esHoy = (hoyDiaSemana - 1) == i;
+                                final esPositivo = neto >= 0;
+                                final double toY = neto == 0
+                                    ? 0.5
+                                    : ((neto.abs() / maxFlujo) * 9.0 + 1.0).clamp(0.5, 10.0);
+                                return _buildBarGroup(i, toY, esHoy, esPositivo, primary);
+                              }),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+
+                  // MOVIMIENTOS RECIENTES
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Historial (${transaccionesFiltradas.length})',
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: onSurface),
+                      ),
+                      Text(
+                        _getTituloPeriodo(),
+                        style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // BUSCADOR EN TIEMPO REAL
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8.0),
+                    child: TextField(
+                      decoration: InputDecoration(
+                        hintText: 'Buscar por concepto, cliente, categoría, banco...',
+                        hintStyle: TextStyle(color: onSurfaceVariant, fontSize: 12),
+                        prefixIcon: Icon(Icons.search, color: onSurfaceVariant, size: 18),
+                        suffixIcon: _busqueda.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear, size: 16),
+                                onPressed: () => setState(() => _busqueda = ''),
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: cardBg,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: borderColor),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: borderColor),
+                        ),
+                      ),
+                      style: TextStyle(color: onSurface, fontSize: 12),
+                      onChanged: (val) => setState(() => _busqueda = val),
+                    ),
+                  ),
+
+                  // FILTRO DE TIPO (TODOS, INGRESOS, EGRESOS)
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: ['TODOS', 'INGRESO', 'EGRESO'].map((tipo) {
+                        final sel = _filtroTipo == tipo;
+                        final label = tipo == 'TODOS' ? 'Todos los Tipos' : (tipo == 'INGRESO' ? 'Solo Ingresos' : 'Solo Egresos');
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8.0),
+                          child: ChoiceChip(
+                            label: Text(label),
+                            selected: sel,
+                            selectedColor: primary.withValues(alpha: 0.2),
+                            backgroundColor: cardBg,
+                            labelStyle: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: sel ? primary : onSurfaceVariant,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                              side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.4)),
+                            ),
+                            onSelected: (val) {
+                              if (val) setState(() => _filtroTipo = tipo);
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  // FILTRO DE CUENTAS / BANCOS DE COLOMBIA
+                  SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: [
+                        'TODAS', 'EFECTIVO', 'BANCOLOMBIA', 'NEQUI', 'DAVIPLATA', 'DAVIVIENDA', 'BANCO_BOGOTA', 'BBVA', 'PSE'
+                      ].map((cuentaKey) {
+                        final sel = _filtroCuenta == cuentaKey;
+                        final label = cuentaKey == 'TODAS'
+                            ? 'Todas las Cuentas'
+                            : TransaccionModel.nombreMetodo(cuentaKey);
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 6.0),
+                          child: FilterChip(
+                            label: Text(label),
+                            selected: sel,
+                            showCheckmark: false,
+                            selectedColor: primary.withValues(alpha: 0.18),
+                            backgroundColor: cardBg,
+                            labelStyle: TextStyle(
+                              fontSize: 10,
+                              fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                              color: sel ? primary : onSurfaceVariant,
+                            ),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              side: BorderSide(color: sel ? primary : borderColor.withValues(alpha: 0.3)),
+                            ),
+                            onSelected: (val) {
+                              setState(() => _filtroCuenta = val ? cuentaKey : 'TODAS');
+                            },
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  if (transaccionesFiltradas.isEmpty)
+                    Container(
+                      padding: const EdgeInsets.all(24),
+                      alignment: Alignment.center,
+                      child: Text('No hay movimientos en este período.', style: TextStyle(color: onSurfaceVariant)),
+                    )
+                  else
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: transaccionesFiltradas.length,
+                      itemBuilder: (context, index) {
+                        final t = transaccionesFiltradas[index];
+                        return _buildRecentJobCard(t, cardBg, primary, onSurface, onSurfaceVariant, borderColor);
+                      },
+                    ),
+
+                  const SizedBox(height: 95),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  BarChartGroupData _buildBarGroup(int x, double y, bool destacado, bool esPositivo, Color primary) {
+    final barColor = esPositivo ? primary : AgroTheme.error;
+    return BarChartGroupData(
+      x: x,
+      barRods: [
+        BarChartRodData(
+          toY: y,
+          color: destacado ? barColor : barColor.withValues(alpha: 0.35),
+          width: 22,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(5)),
+          borderSide: destacado ? BorderSide(color: barColor, width: 2) : BorderSide.none,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildRecentJobCard(
+    TransaccionModel trans,
+    Color cardBg,
+    Color primary,
+    Color onSurface,
+    Color onSurfaceVariant,
+    Color borderColor,
+  ) {
+    final esIngreso = trans.tipo == 'INGRESO';
+    final colorMonto = esIngreso ? primary : (trans.tipo == 'EGRESO' ? AgroTheme.error : Colors.orangeAccent);
+    final signo = esIngreso ? '+' : (trans.tipo == 'EGRESO' ? '-' : '');
+    final fechaStr = DateFormat('MMM dd, yyyy', 'es').format(trans.fecha);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor.withValues(alpha: 0.4)),
+        boxShadow: AgroTheme.getShadow(context),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  trans.descripcion,
+                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: onSurface),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                '$signo${_currencyFormat.format(trans.monto)}',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: colorMonto),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(Icons.calendar_today, size: 12, color: onSurfaceVariant),
+              const SizedBox(width: 4),
+              Text(fechaStr, style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  spacing: 6,
+                  runSpacing: 4,
+                  children: [
+                    Container(
+                      width: 6,
+                      height: 6,
+                      decoration: BoxDecoration(color: primary, shape: BoxShape.circle),
+                    ),
+                    Text('Cat: ${trans.categoria}', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                    Text('•', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                    Text('Tipo: ${trans.tipo}', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: trans.esEfectivo
+                            ? Colors.green.withValues(alpha: 0.15)
+                            : Colors.blueAccent.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        TransaccionModel.nombreMetodo(trans.metodoPago),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                          color: trans.esEfectivo
+                              ? (Theme.of(context).brightness == Brightness.dark ? Colors.greenAccent : const Color(0xFF1B5E20))
+                              : Colors.blueAccent,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                children: [
+                  IconButton(
+                    icon: Icon(Icons.edit, size: 18, color: primary),
+                    tooltip: 'Editar',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () => _mostrarDialogoEditarTransaccion(context, trans),
+                  ),
+                  const SizedBox(width: 14),
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, size: 18, color: AgroTheme.error),
+                    tooltip: 'Eliminar',
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(),
+                    onPressed: () => _confirmarEliminarTransaccion(trans),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // TAB 2: CUENTAS POR COBRAR (SERVICIOS PENDIENTES DE PAGO CON ABONOS)
+  // ---------------------------------------------------------------------------
+  Widget _buildCuentasPorCobrarTab(Color cardBg, Color primary, Color onSurface, Color onSurfaceVariant, Color borderColor) {
+    return StreamBuilder<QuerySnapshot>(
+      stream: FirebaseFirestore.instance.collection('servicios').snapshots(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Center(child: CircularProgressIndicator(color: primary));
+        }
+
+        final docs = snapshot.data?.docs ?? [];
+        final todosServicios = docs.map((doc) => ServicioModel.fromMap(doc.id, doc.data() as Map<String, dynamic>)).toList();
+        final pendientes = todosServicios.where((s) => !s.pagado && s.estado != 'CANCELADO').toList();
+        final totalDeuda = pendientes.fold<double>(0, (prev, s) => prev + s.saldoPendiente);
+
+        return SingleChildScrollView(
+          padding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 12.0, bottom: 95.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // TARJETA DE RESUMEN DE CARTERA
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.6)),
+                  boxShadow: AgroTheme.getShadow(context),
+                ),
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.pending_actions, size: 38, color: Colors.orangeAccent),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Total Cuánto se Debe (Cartera de Clientes)', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
+                              Text(
+                                _currencyFormat.format(totalDeuda),
+                                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Colors.orangeAccent),
+                              ),
+                              Text('${pendientes.length} servicios pendientes o con saldo', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Divider(height: 1),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            side: const BorderSide(color: Colors.orangeAccent),
+                            foregroundColor: Colors.orangeAccent,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                          icon: const Icon(Icons.picture_as_pdf, size: 16),
+                          label: const Text('Informe General Cartera (PDF)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          onPressed: () {
+                            PdfService.generarYCompartirCarteraGeneral(serviciosPendientes: pendientes);
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 18),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Clientes con Pagos Pendientes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: onSurface)),
+                  Text('${pendientes.length} activos', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
+                ],
+              ),
+              const SizedBox(height: 10),
+
+              if (pendientes.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(32),
+                  alignment: Alignment.center,
+                  child: Text('¡Excelente! No hay cobros pendientes.', style: TextStyle(color: onSurfaceVariant)),
+                )
+              else
+                ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: pendientes.length,
+                  itemBuilder: (context, index) {
+                    final s = pendientes[index];
+                    final double pctAbonado = s.precioTotal > 0
+                        ? (s.totalAbonado / s.precioTotal).clamp(0.0, 1.0)
+                        : 0.0;
+
+                    return Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: cardBg,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: borderColor.withValues(alpha: 0.4)),
+                        boxShadow: AgroTheme.getShadow(context),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  s.clienteNombre,
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: onSurface),
+                                ),
+                              ),
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.end,
+                                children: [
+                                  Text(
+                                    'Resta: ${_currencyFormat.format(s.saldoPendiente)}',
+                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Colors.orangeAccent),
+                                  ),
+                                  if (s.totalAbonado > 0)
+                                    Text(
+                                      'Total: ${_currencyFormat.format(s.precioTotal)}',
+                                      style: TextStyle(fontSize: 10, color: onSurfaceVariant, decoration: TextDecoration.lineThrough),
+                                    ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              CropBadge(cultivo: s.cultivo),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: s.metodoPago == 'EN_LINEA'
+                                      ? Colors.blueAccent.withValues(alpha: 0.15)
+                                      : Colors.green.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  s.metodoPago == 'EN_LINEA' ? '💳 Transferencia' : '💵 Efectivo',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: s.metodoPago == 'EN_LINEA' ? Colors.blueAccent : (Theme.of(context).brightness == Brightness.dark ? Colors.greenAccent : const Color(0xFF1B5E20)),
+                                  ),
+                                ),
+                              ),
+                              if (s.totalAbonado > 0)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.green.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Abonado: ${_currencyFormat.format(s.totalAbonado)}',
+                                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text('📍 ${s.fincaUbicacion} • ${s.hectareas} Ha', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
+
+                          // BARRA DE PROGRESO DE ABONO
+                          if (s.totalAbonado > 0) ...[
+                            const SizedBox(height: 8),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(4),
+                              child: LinearProgressIndicator(
+                                value: pctAbonado,
+                                minHeight: 6,
+                                backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: Text(
+                                '${(pctAbonado * 100).toStringAsFixed(0)}% pagado',
+                                style: TextStyle(fontSize: 10, color: onSurfaceVariant),
+                              ),
+                            ),
+                          ],
+
+                          const Divider(height: 18),
+
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            alignment: WrapAlignment.end,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              TextButton.icon(
+                                style: TextButton.styleFrom(
+                                  foregroundColor: AgroTheme.error,
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                icon: const Icon(Icons.cancel_outlined, size: 15),
+                                label: const Text('Cancelar', style: TextStyle(fontSize: 12)),
+                                onPressed: () => _cancelarServicioPorCobrar(s),
+                              ),
+                              IconButton(
+                                tooltip: 'Editar Monto Total',
+                                icon: Icon(Icons.edit_outlined, size: 17, color: primary),
+                                onPressed: () => _mostrarDialogoEditarMontoServicio(s),
+                              ),
+                              OutlinedButton.icon(
+                                style: OutlinedButton.styleFrom(
+                                  visualDensity: VisualDensity.compact,
+                                  side: BorderSide(color: primary.withValues(alpha: 0.6)),
+                                ),
+                                icon: Icon(Icons.receipt_long, size: 15, color: primary),
+                                label: Text('Estado Cuenta', style: TextStyle(color: primary, fontSize: 12, fontWeight: FontWeight.bold)),
+                                onPressed: () => _mostrarOpcionesEstadoCuentaCliente(s, todosServicios),
+                              ),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.teal,
+                                  foregroundColor: Colors.white,
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                ),
+                                icon: const Icon(Icons.payments_outlined, size: 15),
+                                label: const Text('Abonar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                onPressed: () => _mostrarDialogoAbonarServicio(s),
+                              ),
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: primary,
+                                  foregroundColor: Colors.black,
+                                  visualDensity: VisualDensity.compact,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                ),
+                                icon: const Icon(Icons.check, size: 16),
+                                label: const Text('Cobrar Todo', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                onPressed: () => _registrarCobroServicio(s),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+
+              const SizedBox(height: 95),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ===========================================================================
+  // GENERADOR DE BALANCE MENSUAL FORMAL
+  // ===========================================================================
+  void _generarBalanceMensual(BuildContext context) async {
+    final now = DateTime.now();
+    final mesNombre = DateFormat('MMMM yyyy', 'es').format(now);
+
+    final snapTrans = await FirebaseFirestore.instance.collection('transacciones').get();
+    final snapServ = await FirebaseFirestore.instance.collection('servicios').get();
+
+    final todasTrans = snapTrans.docs.map((d) => TransaccionModel.fromMap(d.id, d.data())).toList();
+    final todosServ = snapServ.docs.map((d) => ServicioModel.fromMap(d.id, d.data())).toList();
+
+    // Filtrar para el mes actual
+    final transMes = todasTrans.where((t) => t.fecha.year == now.year && t.fecha.month == now.month).toList();
+    final servMes = todosServ.where((s) => s.fecha.year == now.year && s.fecha.month == now.month).toList();
+
+    double ingMes = 0;
+    double ingEfectivoMes = 0;
+    double ingLineaMes = 0;
+    double egrMes = 0;
+    final Map<String, double> egresosPorCat = {};
+    final Map<String, int> egresosConteoPorCat = {};
+
+    for (var t in transMes) {
+      if (t.tipo == 'INGRESO') {
+        ingMes += t.monto;
+        if (t.metodoPago == 'EN_LINEA') {
+          ingLineaMes += t.monto;
+        } else {
+          ingEfectivoMes += t.monto;
+        }
+      }
+      if (t.tipo == 'EGRESO') {
+        egrMes += t.monto;
+        egresosPorCat[t.categoria] = (egresosPorCat[t.categoria] ?? 0) + t.monto;
+        egresosConteoPorCat[t.categoria] = (egresosConteoPorCat[t.categoria] ?? 0) + 1;
+      }
+    }
+
+    double porCobrarMes = 0;
+    double haMes = 0;
+    for (var s in servMes) {
+      haMes += s.hectareas;
+      if (!s.pagado && s.estado != 'CANCELADO') {
+        porCobrarMes += s.saldoPendiente;
+      }
+    }
+
+    final utilidadNeta = ingMes - egrMes;
+
+    // Generar formato de reporte
+    final buffer = StringBuffer();
+    buffer.writeln('========================================');
+    buffer.writeln('🚁 ICARO PROAGRO - BALANCE CONTABLE MENSUAL 🌾');
+    buffer.writeln('Mes: ${mesNombre.toUpperCase()}');
+    buffer.writeln('Fecha de emisión: ${DateFormat("dd/MM/yyyy HH:mm").format(now)}');
+    buffer.writeln('========================================\n');
+    buffer.writeln('1. TOTALES Y RECAUDOS DE INGRESOS:');
+    buffer.writeln('• En Efectivo:               ${_currencyFormat.format(ingEfectivoMes)}');
+    buffer.writeln('• En Línea / Transferencias: ${_currencyFormat.format(ingLineaMes)}');
+    buffer.writeln('• TOTAL INGRESOS:            ${_currencyFormat.format(ingMes)}\n');
+    buffer.writeln('2. TOTALES Y DESGLOSE DE EGRESOS:');
+    if (egresosPorCat.isEmpty) {
+      buffer.writeln('  (Sin gastos registrados en el mes)');
+    } else {
+      egresosPorCat.forEach((cat, valor) {
+        final pct = egrMes > 0 ? (valor / egrMes * 100).toStringAsFixed(1) : '0';
+        final conteo = egresosConteoPorCat[cat] ?? 1;
+        buffer.writeln('• $cat ($conteo reg.): ${_currencyFormat.format(valor)} ($pct%)');
+      });
+      buffer.writeln('• TOTAL EGRESOS:             ${_currencyFormat.format(egrMes)} (100%)\n');
+    }
+    buffer.writeln('3. RESULTADOS OPERACIONALES:');
+    buffer.writeln('• UTILIDAD OPERATIVA NETA:   ${_currencyFormat.format(utilidadNeta)}');
+    buffer.writeln('• Cuentas Pendientes Cobro:  ${_currencyFormat.format(porCobrarMes)}');
+    buffer.writeln('• Total Hectáreas Fumigadas: ${haMes.toStringAsFixed(1)} Ha');
+    buffer.writeln('• Total Vuelos Registrados:  ${servMes.length}');
+    buffer.writeln('\n========================================');
+    buffer.writeln('Icaro Proagro - Tecnología Aérea');
+
+    final textoBalance = buffer.toString();
+
+    if (!context.mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 18.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Icon(Icons.description, color: Theme.of(context).colorScheme.primary, size: 24),
+                const SizedBox(width: 8),
+                Text(
+                  'Balance Mensual - $mesNombre',
+                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              constraints: const BoxConstraints(maxHeight: 220),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5)),
+              ),
+              child: SingleChildScrollView(
+                child: Text(
+                  textoBalance,
+                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Colors.black,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.picture_as_pdf, size: 18),
+                label: const Text(
+                  'Generar e Imprimir Balance Oficial PDF',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                ),
+                onPressed: () async {
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Generando documento PDF oficial de Icaro Proagro...')),
+                  );
+                  await PdfService.generarYCompartirBalance(
+                    periodoTitulo: mesNombre.toUpperCase(),
+                    transacciones: transMes,
+                    servicios: servMes,
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 11),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                icon: const Icon(Icons.copy, size: 16),
+                label: const Text('Copiar Texto para WhatsApp'),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: textoBalance));
+                  Navigator.pop(ctx);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('¡Balance copiado al portapapeles!')),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _mostrarDialogoGastoRapido(BuildContext context) {
+    double monto = 0;
+    String categoria = 'COMBUSTIBLE';
+    String descripcion = '';
+    String metodoPago = 'EFECTIVO';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setMState) => AlertDialog(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          title: const Text('Registrar Gasto Rápido'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              DropdownButtonFormField<String>(
+                initialValue: categoria,
+                items: ['COMBUSTIBLE', 'MANTENIMIENTO', 'PILOTO', 'INSUMOS', 'BATERIAS', 'VIATICOS', 'CASA', 'OTROS']
+                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                    .toList(),
+                onChanged: (val) => setMState(() => categoria = val!),
+                decoration: const InputDecoration(labelText: 'Categoría de Gasto'),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                decoration: const InputDecoration(labelText: 'Monto del Gasto (\$)'),
+                keyboardType: TextInputType.number,
+                onChanged: (v) => monto = double.tryParse(v) ?? 0,
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                decoration: const InputDecoration(labelText: 'Concepto (ej: Gasolina generador)'),
+                onChanged: (v) => descripcion = v,
+              ),
+              const SizedBox(height: 10),
+              DropdownButtonFormField<String>(
+                initialValue: metodoPago,
+                items: const [
+                  DropdownMenuItem(value: 'EFECTIVO', child: Text('💵 Efectivo')),
+                  DropdownMenuItem(value: 'EN_LINEA', child: Text('💳 Transferencia / En Línea')),
+                ],
+                onChanged: (val) => setMState(() => metodoPago = val ?? 'EFECTIVO'),
+                decoration: const InputDecoration(labelText: 'Método de Pago'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AgroTheme.error, foregroundColor: Colors.white),
+              onPressed: () async {
+                if (monto > 0) {
+                  await FirebaseFirestore.instance.collection('transacciones').add({
+                    'tipo': 'EGRESO',
+                    'categoria': categoria,
+                    'monto': monto,
+                    'descripcion': descripcion.isNotEmpty ? descripcion : 'Gasto de $categoria',
+                    'fecha': DateTime.now().toIso8601String(),
+                    'metodoPago': metodoPago,
+                  });
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
+              },
+              child: const Text('Guardar Gasto'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _mostrarDialogoEditarMontoServicio(ServicioModel s) {
+    double nuevoMonto = s.precioTotal;
+    final controller = TextEditingController(text: s.precioTotal.toStringAsFixed(0));
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        title: Text('Editar Cobro - ${s.clienteNombre}'),
+        content: TextFormField(
+          controller: controller,
+          decoration: const InputDecoration(labelText: 'Monto Total a Cobrar (\$)'),
+          keyboardType: TextInputType.number,
+          onChanged: (val) {
+            final v = double.tryParse(val);
+            if (v != null) nuevoMonto = v;
+          },
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          ElevatedButton(
+            onPressed: () async {
+              if (s.id != null) {
+                await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
+                  'precioTotal': nuevoMonto,
+                });
+              }
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+            child: const Text('Actualizar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _registrarCobroServicio(ServicioModel s) async {
+    String metodoCobro = s.metodoPago;
+    final montoRestante = s.saldoPendiente;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          title: const Text('¿Confirmar Cobro Total?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Se cancelará el saldo pendiente de ${s.clienteNombre} por ${_currencyFormat.format(montoRestante)} y el servicio quedará 100% pagado.',
+              ),
+              if (s.totalAbonado > 0) ...[
+                const SizedBox(height: 8),
+                Text(
+                  '(Ya abonó previamente ${_currencyFormat.format(s.totalAbonado)} de un total de ${_currencyFormat.format(s.precioTotal)})',
+                  style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+              ],
+              const SizedBox(height: 14),
+              DropdownButtonFormField<String>(
+                initialValue: metodoCobro,
+                items: const [
+                  DropdownMenuItem(value: 'EFECTIVO', child: Text('💵 Efectivo en Mano')),
+                  DropdownMenuItem(value: 'EN_LINEA', child: Text('💳 Transferencia / En Línea')),
+                ],
+                onChanged: (val) => setDialogState(() => metodoCobro = val ?? 'EFECTIVO'),
+                decoration: const InputDecoration(labelText: 'Medio de Pago Recibido'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+            ElevatedButton(
+              onPressed: () async {
+                final messenger = ScaffoldMessenger.of(context);
+                final navigator = Navigator.of(ctx);
+
+                if (s.id != null) {
+                  await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
+                    'pagado': true,
+                    'totalAbonado': s.precioTotal,
+                    'estado': 'COMPLETADO',
+                    'metodoPago': metodoCobro,
+                  });
+                }
+
+                await FirebaseFirestore.instance.collection('transacciones').add({
+                  'tipo': 'INGRESO',
+                  'categoria': 'SERVICIO',
+                  'monto': montoRestante,
+                  'descripcion': 'Cobro Total Fumigación ${s.cultivo} (${s.hectareas} Ha) - ${s.clienteNombre}',
+                  'fecha': DateTime.now().toIso8601String(),
+                  'clienteNombre': s.clienteNombre,
+                  'servicioId': s.id,
+                  'metodoPago': metodoCobro,
+                });
+
+                NotificationService.instance.notificarAbonoRegistrado(
+                  cliente: s.clienteNombre,
+                  monto: montoRestante,
+                  saldo: 0.0,
+                );
+
+                navigator.pop();
+                messenger.showSnackBar(
+                  SnackBar(content: Text('¡Cobro de ${_currencyFormat.format(montoRestante)} registrado con éxito!')),
+                );
+              },
+              child: const Text('Confirmar Cobro'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _mostrarDialogoAbonarServicio(ServicioModel s) {
+    final formKey = GlobalKey<FormState>();
+    final saldoActual = s.saldoPendiente;
+    final controller = TextEditingController();
+    String metodoPago = s.metodoPago;
+    String notaAbono = '';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return AlertDialog(
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            title: Row(
+              children: [
+                const Icon(Icons.payments_outlined, color: Colors.teal),
+                const SizedBox(width: 8),
+                const Expanded(child: Text('Registrar Abono')),
+              ],
+            ),
+            content: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      s.clienteNombre,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                    ),
+                    Text(
+                      '${s.cultivo} • ${s.hectareas} Ha • ${s.fincaUbicacion}',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Total Servicio:', style: TextStyle(fontSize: 12)),
+                              Text(_currencyFormat.format(s.precioTotal), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Ya Abonado:', style: TextStyle(fontSize: 12, color: Colors.green)),
+                              Text(_currencyFormat.format(s.totalAbonado), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.green)),
+                            ],
+                          ),
+                          const Divider(height: 12),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Saldo Pendiente:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                              Text(
+                                _currencyFormat.format(saldoActual),
+                                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.orangeAccent),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    TextFormField(
+                      controller: controller,
+                      decoration: const InputDecoration(
+                        labelText: 'Monto del Abono (\$)',
+                        prefixText: '\$ ',
+                        hintText: 'Ej. 250000',
+                      ),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      validator: (val) {
+                        if (val == null || val.trim().isEmpty) return 'Ingrese un monto';
+                        final numVal = double.tryParse(val.replaceAll('.', '').replaceAll(',', '').trim());
+                        if (numVal == null || numVal <= 0) return 'Monto inválido';
+                        if (numVal > saldoActual + 1.0) return 'Supera el saldo (${_currencyFormat.format(saldoActual)})';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 8),
+                    // Quick chips para agilizar
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          ActionChip(
+                            label: const Text('Todo el Saldo', style: TextStyle(fontSize: 11)),
+                            onPressed: () {
+                              controller.text = saldoActual.toStringAsFixed(0);
+                            },
+                          ),
+                          const SizedBox(width: 6),
+                          ActionChip(
+                            label: const Text('50%', style: TextStyle(fontSize: 11)),
+                            onPressed: () {
+                              controller.text = (saldoActual * 0.5).round().toString();
+                            },
+                          ),
+                          const SizedBox(width: 6),
+                          ActionChip(
+                            label: const Text('30%', style: TextStyle(fontSize: 11)),
+                            onPressed: () {
+                              controller.text = (saldoActual * 0.3).round().toString();
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButtonFormField<String>(
+                      initialValue: metodoPago,
+                      decoration: const InputDecoration(labelText: 'Método de Pago'),
+                      items: const [
+                        DropdownMenuItem(value: 'EFECTIVO', child: Text('💵 Efectivo')),
+                        DropdownMenuItem(value: 'EN_LINEA', child: Text('💳 Transferencia / En Línea')),
+                      ],
+                      onChanged: (val) => setModalState(() => metodoPago = val ?? 'EFECTIVO'),
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      decoration: const InputDecoration(labelText: 'Nota / Referencia (Opcional)'),
+                      onSaved: (val) => notaAbono = val ?? '',
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () async {
+                  if (formKey.currentState!.validate()) {
+                    formKey.currentState!.save();
+
+                    final montoAbono = double.parse(controller.text.replaceAll('.', '').replaceAll(',', '').trim());
+                    final nuevoTotalAbonado = s.totalAbonado + montoAbono;
+                    final bool quedaPagado = nuevoTotalAbonado >= (s.precioTotal - 1.0);
+                    final saldoRestante = (s.precioTotal - nuevoTotalAbonado).clamp(0.0, double.infinity);
+
+                    if (s.id != null) {
+                      await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
+                        'totalAbonado': nuevoTotalAbonado,
+                        'pagado': quedaPagado,
+                        if (quedaPagado) 'estado': 'COMPLETADO',
+                        'metodoPago': metodoPago,
+                      });
+                    }
+
+                    final descNota = notaAbono.isNotEmpty ? ' ($notaAbono)' : '';
+                    await FirebaseFirestore.instance.collection('transacciones').add({
+                      'tipo': 'INGRESO',
+                      'categoria': 'SERVICIO',
+                      'monto': montoAbono,
+                      'descripcion': 'Abono Fumigación ${s.cultivo} (${s.hectareas} Ha) - ${s.clienteNombre}$descNota',
+                      'fecha': DateTime.now().toIso8601String(),
+                      'clienteNombre': s.clienteNombre,
+                      'servicioId': s.id,
+                      'metodoPago': metodoPago,
+                    });
+
+                    NotificationService.instance.notificarAbonoRegistrado(
+                      cliente: s.clienteNombre,
+                      monto: montoAbono,
+                      saldo: saldoRestante,
+                    );
+
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (!context.mounted) return;
+
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('¡Abono de ${_currencyFormat.format(montoAbono)} registrado!'),
+                        duration: const Duration(seconds: 7),
+                        action: SnackBarAction(
+                          label: 'Recibo WhatsApp',
+                          textColor: Colors.greenAccent,
+                          onPressed: () => _compartirReciboAbonoWhatsApp(
+                            s,
+                            montoAbono,
+                            nuevoTotalAbonado,
+                            saldoRestante,
+                            metodoPago,
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Confirmar Abono'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _mostrarOpcionesEstadoCuentaCliente(ServicioModel s, List<ServicioModel> todosServicios) {
+    final serviciosCliente = todosServicios
+        .where((srv) => srv.clienteNombre.trim().toLowerCase() == s.clienteNombre.trim().toLowerCase() && srv.estado != 'CANCELADO')
+        .toList();
+
+    double totalFacturado = 0;
+    double totalAbonado = 0;
+    for (var srv in serviciosCliente) {
+      totalFacturado += srv.precioTotal;
+      totalAbonado += srv.totalAbonado;
+    }
+    final double saldoTotalDebe = (totalFacturado - totalAbonado).clamp(0.0, double.infinity);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.account_balance_wallet, color: Colors.orangeAccent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Estado de Cuenta: ${s.clienteNombre}',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orangeAccent.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Servicios acumulados: ${serviciosCliente.length}', style: const TextStyle(fontSize: 12)),
+                      Text('Total Abonado: ${_currencyFormat.format(totalAbonado)}', style: const TextStyle(fontSize: 12, color: Colors.green)),
+                    ],
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text('Saldo Total Deudor', style: TextStyle(fontSize: 11, color: Colors.orangeAccent)),
+                      Text(
+                        _currencyFormat.format(saldoTotalDebe),
+                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.orangeAccent),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: Colors.redAccent,
+                child: Icon(Icons.picture_as_pdf, color: Colors.white, size: 20),
+              ),
+              title: const Text('Descargar / Compartir Estado de Cuenta (PDF)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              subtitle: const Text('Documento formal con membrete Icaro Proagro para imprimir o enviar', style: TextStyle(fontSize: 11)),
+              onTap: () {
+                Navigator.pop(ctx);
+                PdfService.generarYCompartirEstadoCuentaCliente(
+                  clienteNombre: s.clienteNombre,
+                  clienteTelefono: s.clienteTelefono,
+                  fincaUbicacion: s.fincaUbicacion,
+                  serviciosCliente: serviciosCliente,
+                );
+              },
+            ),
+            const Divider(),
+            ListTile(
+              leading: const CircleAvatar(
+                backgroundColor: Colors.green,
+                child: Icon(Icons.chat, color: Colors.white, size: 20),
+              ),
+              title: const Text('Enviar Resumen por WhatsApp', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              subtitle: const Text('Envía al cliente el detalle claro y cortés de cuánto debe', style: TextStyle(fontSize: 11)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _enviarEstadoCuentaWhatsApp(s, serviciosCliente, totalFacturado, totalAbonado, saldoTotalDebe);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _enviarEstadoCuentaWhatsApp(
+    ServicioModel s,
+    List<ServicioModel> servicios,
+    double totalFacturado,
+    double totalAbonado,
+    double saldoTotalDebe,
+  ) async {
+    final buffer = StringBuffer();
+    buffer.writeln('🚁 *ICARO PROAGRO - ESTADO DE CUENTA Y CARTERA* 🌾');
+    buffer.writeln('Estimado/a *${s.clienteNombre}*, le compartimos el resumen consolidado de sus servicios de fumigación aérea:');
+    buffer.writeln('');
+    buffer.writeln('📍 *Finca / Ubicación:* ${s.fincaUbicacion}');
+    buffer.writeln('📅 *Fecha de Corte:* ${DateFormat("dd/MM/yyyy").format(DateTime.now())}');
+    buffer.writeln('----------------------------------------');
+    buffer.writeln('*DETALLE DE SERVICIOS:*');
+
+    for (var srv in servicios) {
+      final fStr = DateFormat("dd/MM/yyyy").format(srv.fecha);
+      final estadoStr = srv.pagado
+          ? '✅ PAGADO'
+          : (srv.totalAbonado > 0
+              ? '⏳ ABONADO ${_currencyFormat.format(srv.totalAbonado)} (Resta ${_currencyFormat.format(srv.saldoPendiente)})'
+              : '⚠️ PENDIENTE ${_currencyFormat.format(srv.precioTotal)}');
+      buffer.writeln('• $fStr | ${srv.cultivo} (${srv.hectareas} Ha): $estadoStr');
+    }
+
+    buffer.writeln('----------------------------------------');
+    buffer.writeln('📊 *Total Facturado:* ${_currencyFormat.format(totalFacturado)}');
+    buffer.writeln('💵 *Total Abonado:* ${_currencyFormat.format(totalAbonado)}');
+    buffer.writeln('⚠️ *SALDO TOTAL PENDIENTE:* ${_currencyFormat.format(saldoTotalDebe)}');
+    buffer.writeln('----------------------------------------');
+    buffer.writeln('📲 _Para coordinar su pago o cualquier inquietud, comuníquese con el equipo de Icaro Proagro._');
+
+    final texto = Uri.encodeComponent(buffer.toString());
+    final telLimpio = s.clienteTelefono.replaceAll(RegExp(r'[^0-9]'), '');
+    final uri = telLimpio.isNotEmpty
+        ? Uri.parse('https://wa.me/57$telLimpio?text=$texto')
+        : Uri.parse('https://wa.me/?text=$texto');
+
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        Clipboard.setData(ClipboardData(text: buffer.toString()));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mensaje copiado al portapapeles para enviar por WhatsApp')),
+        );
+      }
+    }
+  }
+
+  void _compartirReciboAbonoWhatsApp(
+    ServicioModel s,
+    double montoAbono,
+    double nuevoTotalAbonado,
+    double saldoRestante,
+    String metodoPago,
+  ) async {
+    final buffer = StringBuffer();
+    buffer.writeln('🚁 *ICARO PROAGRO - COMPROBANTE DE ABONO* 🌾');
+    buffer.writeln('Cliente: *${s.clienteNombre}*');
+    buffer.writeln('Finca: ${s.fincaUbicacion}');
+    buffer.writeln('Servicio: Fumigación ${s.cultivo} (${s.hectareas} Ha)');
+    buffer.writeln('📅 Fecha: ${DateFormat("dd/MM/yyyy HH:mm").format(DateTime.now())}');
+    buffer.writeln('----------------------------------------');
+    buffer.writeln('💵 *Monto Abonado:* ${_currencyFormat.format(montoAbono)}');
+    buffer.writeln('💳 *Método:* ${metodoPago == "EN_LINEA" ? "Transferencia / En Línea" : "Efectivo"}');
+    buffer.writeln('----------------------------------------');
+    buffer.writeln('📊 *Total Servicio:* ${_currencyFormat.format(s.precioTotal)}');
+    buffer.writeln('💰 *Total Abonado:* ${_currencyFormat.format(nuevoTotalAbonado)}');
+    buffer.writeln('📌 *Saldo Restante:* ${_currencyFormat.format(saldoRestante)}');
+    if (saldoRestante <= 0) {
+      buffer.writeln('\n✅ *¡Servicio totalmente cancelado y al día!*');
+    }
+    buffer.writeln('\n_Gracias por preferir la tecnología aérea de Icaro Proagro._');
+
+    final texto = Uri.encodeComponent(buffer.toString());
+    final telLimpio = s.clienteTelefono.replaceAll(RegExp(r'[^0-9]'), '');
+    final uri = telLimpio.isNotEmpty
+        ? Uri.parse('https://wa.me/57$telLimpio?text=$texto')
+        : Uri.parse('https://wa.me/?text=$texto');
+
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        Clipboard.setData(ClipboardData(text: buffer.toString()));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Comprobante copiado al portapapeles')),
+        );
+      }
+    }
+  }
+
+  void _mostrarDialogoEditarTransaccion(BuildContext context, TransaccionModel? transExistente) {
+    final formKey = GlobalKey<FormState>();
+
+    String tipo = transExistente?.tipo ?? 'INGRESO';
+    String categoria = transExistente?.categoria ?? 'SERVICIO';
+    double monto = transExistente?.monto ?? 0;
+    String descripcion = transExistente?.descripcion ?? '';
+    DateTime fecha = transExistente?.fecha ?? DateTime.now();
+    String metodoPago = transExistente?.metodoPago ?? 'EFECTIVO';
+
+    final categorias = [
+      'SERVICIO',
+      'COMBUSTIBLE',
+      'MANTENIMIENTO',
+      'PILOTO',
+      'INSUMOS',
+      'BATERIAS',
+      'VIATICOS',
+      'CASA',
+      'OTROS',
+    ];
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return AlertDialog(
+              backgroundColor: Theme.of(context).colorScheme.surface,
+              title: Text(transExistente == null ? 'Nuevo Movimiento' : 'Editar Movimiento'),
+              content: Form(
+                key: formKey,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      DropdownButtonFormField<String>(
+                        initialValue: tipo,
+                        items: ['INGRESO', 'EGRESO', 'DEUDA']
+                            .map((e) => DropdownMenuItem(value: e, child: Text(e)))
+                            .toList(),
+                        onChanged: (val) => setModalState(() => tipo = val!),
+                        decoration: const InputDecoration(labelText: 'Tipo de movimiento'),
+                      ),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        initialValue: categoria,
+                        items: categorias
+                            .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                            .toList(),
+                        onChanged: (val) => setModalState(() => categoria = val!),
+                        decoration: const InputDecoration(labelText: 'Categoría'),
+                      ),
+                      const SizedBox(height: 10),
+                      DropdownButtonFormField<String>(
+                        initialValue: TransaccionModel.metodosPagoMap.containsKey(metodoPago) ? metodoPago : 'EFECTIVO',
+                        items: const [
+                          DropdownMenuItem(value: 'EFECTIVO', child: Text('💵 Efectivo (Caja General)')),
+                          DropdownMenuItem(value: 'BANCOLOMBIA', child: Text('🟡 Bancolombia')),
+                          DropdownMenuItem(value: 'NEQUI', child: Text('🟣 Nequi')),
+                          DropdownMenuItem(value: 'DAVIPLATA', child: Text('🔴 Daviplata')),
+                          DropdownMenuItem(value: 'DAVIVIENDA', child: Text('🔴 Davivienda')),
+                          DropdownMenuItem(value: 'BANCO_BOGOTA', child: Text('🔵 Banco de Bogotá')),
+                          DropdownMenuItem(value: 'BBVA', child: Text('🔵 BBVA')),
+                          DropdownMenuItem(value: 'PSE', child: Text('🌐 PSE / Transferencia')),
+                          DropdownMenuItem(value: 'EN_LINEA', child: Text('💳 En Línea (General)')),
+                          DropdownMenuItem(value: 'OTROS', child: Text('🏦 Otra Cuenta')),
+                        ],
+                        onChanged: (val) => setModalState(() => metodoPago = val ?? 'EFECTIVO'),
+                        decoration: const InputDecoration(labelText: 'Cuenta / Método de Pago'),
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        initialValue: monto > 0 ? monto.toStringAsFixed(0) : '',
+                        decoration: const InputDecoration(
+                          labelText: 'Monto (\$) - Totalmente editable',
+                          prefixIcon: Icon(Icons.attach_money),
+                        ),
+                        keyboardType: TextInputType.number,
+                        validator: (val) => val == null || double.tryParse(val) == null ? 'Ingrese un monto válido' : null,
+                        onSaved: (val) => monto = double.parse(val!),
+                      ),
+                      const SizedBox(height: 10),
+                      TextFormField(
+                        initialValue: descripcion,
+                        decoration: const InputDecoration(labelText: 'Descripción / Concepto'),
+                        validator: (val) => val == null || val.isEmpty ? 'Ingrese una descripción' : null,
+                        onSaved: (val) => descripcion = val!,
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Fecha: ${DateFormat('dd/MM/yyyy').format(fecha)}', style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                          TextButton.icon(
+                            icon: Icon(Icons.calendar_today, size: 16, color: Theme.of(context).colorScheme.primary),
+                            label: Text('Cambiar', style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+                            onPressed: () async {
+                              final d = await showDatePicker(
+                                context: context,
+                                initialDate: fecha,
+                                firstDate: DateTime(2023),
+                                lastDate: DateTime(2030),
+                              );
+                              if (d != null) {
+                                setModalState(() => fecha = d);
+                              }
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (formKey.currentState!.validate()) {
+                      formKey.currentState!.save();
+
+                      final messenger = ScaffoldMessenger.of(context);
+                      final navigator = Navigator.of(ctx);
+
+                      if (transExistente == null) {
+                        await FirebaseFirestore.instance.collection('transacciones').add({
+                          'tipo': tipo,
+                          'categoria': categoria,
+                          'monto': monto,
+                          'descripcion': descripcion,
+                          'fecha': fecha.toIso8601String(),
+                          'metodoPago': metodoPago,
+                        });
+                      } else {
+                        await FirebaseFirestore.instance.collection('transacciones').doc(transExistente.id).update({
+                          'tipo': tipo,
+                          'categoria': categoria,
+                          'monto': monto,
+                          'descripcion': descripcion,
+                          'fecha': fecha.toIso8601String(),
+                          'metodoPago': metodoPago,
+                        });
+                      }
+
+                      navigator.pop();
+                      messenger.showSnackBar(
+                        SnackBar(content: Text(transExistente == null ? '¡Movimiento guardado!' : '¡Monto actualizado con éxito!')),
+                      );
+                    }
+                  },
+                  child: Text(transExistente == null ? 'Guardar' : 'Actualizar'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _confirmarEliminarTransaccion(TransaccionModel trans) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        title: const Text('Eliminar Movimiento'),
+        content: Text(
+          '¿Deseas eliminar el registro "${trans.descripcion}" por ${_currencyFormat.format(trans.monto)}?'
+          '${trans.servicioId != null ? '\n\nNota: Este movimiento corresponde a un cobro de vuelo. Al eliminarlo, dicho servicio volverá a figurar en cuentas por cobrar pendientes.' : ''}',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AgroTheme.error, foregroundColor: Colors.white),
+            onPressed: () async {
+              if (trans.id != null) {
+                await FirebaseFirestore.instance.collection('transacciones').doc(trans.id).delete();
+                if (trans.servicioId != null) {
+                  await FirebaseFirestore.instance.collection('servicios').doc(trans.servicioId).update({'pagado': false});
+                }
+              }
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Movimiento eliminado del registro contable')),
+                );
+              }
+            },
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _cancelarServicioPorCobrar(ServicioModel s) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        title: const Text('Cancelar Operación de Vuelo'),
+        content: Text(
+          '¿Deseas marcar la operación de "${s.clienteNombre}" (${s.cultivo} • ${s.hectareas} Ha) como CANCELADA?\n\n'
+          'Esta acción descartará el cobro de la cartera y sincronizará la contabilidad para que no figure deuda activa.',
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Volver')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AgroTheme.error, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              if (s.id != null && s.id!.isNotEmpty) {
+                await FirebaseFirestore.instance.collection('servicios').doc(s.id!).update({
+                  'estado': 'CANCELADO',
+                  'pagado': false,
+                });
+                final transSnap = await FirebaseFirestore.instance
+                    .collection('transacciones')
+                    .where('servicioId', isEqualTo: s.id!)
+                    .get();
+                for (var doc in transSnap.docs) {
+                  await doc.reference.delete();
+                }
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Operación cancelada y sincronizada en contabilidad')),
+                  );
+                }
+              }
+            },
+            child: const Text('Sí, Cancelar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _mostrarDialogoExportarExcel(BuildContext context) async {
+    final snap = await FirebaseFirestore.instance.collection('transacciones').get();
+    final docs = snap.docs;
+
+    final transacciones = docs.map((d) => TransaccionModel.fromMap(d.id, d.data())).toList();
+    transacciones.sort((a, b) => a.fecha.compareTo(b.fecha));
+
+    double sumIngresos = 0;
+    double sumEgresos = 0;
+    double sumDeudas = 0;
+
+    final buffer = StringBuffer();
+    buffer.writeln('FECHA\tTIPO\tCATEGORIA\tDESCRIPCION\tINGRESO\tEGRESO\tDEUDA\tSALDO');
+
+    double saldoAcumulado = 0;
+    for (var t in transacciones) {
+      final fecha = DateFormat('yyyy-MM-dd').format(t.fecha);
+      double ingreso = t.tipo == 'INGRESO' ? t.monto : 0;
+      double egreso = t.tipo == 'EGRESO' ? t.monto : 0;
+      double deuda = t.tipo == 'DEUDA' ? t.monto : 0;
+
+      saldoAcumulado += (ingreso - egreso);
+      sumIngresos += ingreso;
+      sumEgresos += egreso;
+      sumDeudas += deuda;
+
+      buffer.writeln(
+        '$fecha\t${t.tipo}\t${t.categoria}\t${t.descripcion}\t${ingreso.toStringAsFixed(0)}\t${egreso.toStringAsFixed(0)}\t${deuda.toStringAsFixed(0)}\t${saldoAcumulado.toStringAsFixed(0)}',
+      );
+    }
+
+    buffer.writeln('');
+    buffer.writeln('TOTALES:\t\t\t\t${sumIngresos.toStringAsFixed(0)}\t${sumEgresos.toStringAsFixed(0)}\t${sumDeudas.toStringAsFixed(0)}\t${(sumIngresos - sumEgresos).toStringAsFixed(0)}');
+
+    final contenidoParaExcel = buffer.toString();
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        title: Row(
+          children: [
+            Icon(Icons.table_chart, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 8),
+            const Text('Exportar a Excel / Sheets'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Consolidado de ${transacciones.length} transacciones contables.',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 8),
+            Text('• Ingresos: ${_currencyFormat.format(sumIngresos)}', style: TextStyle(color: Theme.of(context).colorScheme.primary)),
+            Text('• Egresos: ${_currencyFormat.format(sumEgresos)}', style: const TextStyle(color: AgroTheme.error)),
+            Text('• Utilidad Neta: ${_currencyFormat.format(sumIngresos - sumEgresos)}', style: const TextStyle(fontWeight: FontWeight.bold)),
+            Text('• Pendiente por Cobrar: ${_currencyFormat.format(sumDeudas)}', style: const TextStyle(color: Colors.orangeAccent)),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.3),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                'Al tocar "Copiar para Excel / Google Sheets", los datos se copian en formato de celdas. Solo abre un archivo nuevo de Excel o Sheets y presiona Ctrl + V.',
+                style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cerrar')),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('Copiar para Excel / Sheets'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: contenidoParaExcel));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('¡Datos copiados! Pégalos (Ctrl+V) en cualquier hoja de Excel o Google Sheets.'),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  IconData _getIconoCategoria(String cat) {
+    final c = cat.toUpperCase();
+    if (c.contains('CASA') || c.contains('HOGAR')) return Icons.home_outlined;
+    if (c.contains('COMBUSTIBLE')) return Icons.local_gas_station;
+    if (c.contains('MANTENIMIENTO')) return Icons.build_outlined;
+    if (c.contains('PILOTO') || c.contains('NOMINA') || c.contains('NÓMINA')) return Icons.badge_outlined;
+    if (c.contains('INSUMO') || c.contains('QUIMICO')) return Icons.science_outlined;
+    if (c.contains('BATERIA') || c.contains('BATERÍA')) return Icons.battery_charging_full;
+    if (c.contains('VIATICO') || c.contains('VIÁTICO') || c.contains('TRANSPORTE')) return Icons.directions_car_outlined;
+    if (c.contains('REPUESTO')) return Icons.precision_manufacturing_outlined;
+    if (c.contains('SEGURO')) return Icons.security_outlined;
+    return Icons.receipt_outlined;
+  }
+}
