@@ -69,6 +69,7 @@ if ($LASTEXITCODE -ne 0) {
     Write-Host "Iniciando proceso de autenticacion..." -ForegroundColor Cyan
     gh auth login -w -p https
 }
+gh auth setup-git
 
 # Obtener o configurar repositorio remoto
 $remoteUrl = git config --get remote.origin.url
