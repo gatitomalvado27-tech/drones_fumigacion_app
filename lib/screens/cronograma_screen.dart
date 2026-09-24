@@ -232,6 +232,7 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                             final dateKey = DateTime(day.year, day.month, day.day);
                             final servicios = serviciosPorDia[dateKey];
                             final bool tieneProgramacion = servicios != null && servicios.isNotEmpty;
+                            final coloresPilotos = _obtenerColoresPilotos(servicios, primary);
 
                             if (tieneProgramacion) {
                               final hayCancelados = servicios.every((s) => s.estado == 'CANCELADO');
@@ -250,9 +251,10 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(color: borderTint, width: 1.2),
                                 ),
-                                child: Text(
-                                  '${day.day}',
-                                  style: TextStyle(
+                                child: _buildDayCellContent(
+                                  day.day,
+                                  coloresPilotos,
+                                  TextStyle(
                                     color: text,
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
@@ -266,6 +268,7 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                             final dateKey = DateTime(day.year, day.month, day.day);
                             final servicios = serviciosPorDia[dateKey];
                             final bool tieneProgramacion = servicios != null && servicios.isNotEmpty;
+                            final coloresPilotos = _obtenerColoresPilotos(servicios, primary);
 
                             return Container(
                               margin: const EdgeInsets.all(3.0),
@@ -275,9 +278,10 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(color: primary, width: 2.0),
                               ),
-                              child: Text(
-                                '${day.day}',
-                                style: TextStyle(
+                              child: _buildDayCellContent(
+                                day.day,
+                                coloresPilotos,
+                                TextStyle(
                                   color: primary,
                                   fontWeight: FontWeight.w900,
                                   fontSize: 13,
@@ -286,6 +290,10 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                             );
                           },
                           selectedBuilder: (context, day, focusedDay) {
+                            final dateKey = DateTime(day.year, day.month, day.day);
+                            final servicios = serviciosPorDia[dateKey];
+                            final coloresPilotos = _obtenerColoresPilotos(servicios, Colors.white);
+
                             return Container(
                               margin: const EdgeInsets.all(3.0),
                               alignment: Alignment.center,
@@ -300,9 +308,10 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                                   ),
                                 ],
                               ),
-                              child: Text(
-                                '${day.day}',
-                                style: const TextStyle(
+                              child: _buildDayCellContent(
+                                day.day,
+                                coloresPilotos,
+                                const TextStyle(
                                   color: Colors.white,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 14,
@@ -348,16 +357,21 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
 
                       const Divider(height: 16),
 
-                      // LEYENDA (Fumigación • Siembra • Monitoreo)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _buildLegendDot(primary, 'Fumigación'),
-                          const SizedBox(width: 16),
-                          _buildLegendDot(Colors.lightBlueAccent, 'Siembra'),
-                          const SizedBox(width: 16),
-                          _buildLegendDot(Colors.orangeAccent, 'Monitoreo / Mapeo'),
-                        ],
+                      // LEYENDA (Fumigación • Siembra • Monitoreo • Piloto)
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildLegendDot(primary, 'Fumigación'),
+                            const SizedBox(width: 12),
+                            _buildLegendDot(Colors.lightBlueAccent, 'Siembra'),
+                            const SizedBox(width: 12),
+                            _buildLegendDot(Colors.orangeAccent, 'Monitoreo'),
+                            const SizedBox(width: 12),
+                            _buildLegendDot(const Color(0xFF1E88E5), 'Color Piloto (arriba)'),
+                          ],
+                        ),
                       ),
                     ],
                   ),
@@ -428,7 +442,9 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                                 onPressed: () {
                                   Navigator.push(
                                     context,
-                                    MaterialPageRoute(builder: (_) => const ServiciosScreen()),
+                                    MaterialPageRoute(
+                                      builder: (_) => ServiciosScreen(fechaInicial: _diaSeleccionado),
+                                    ),
                                   );
                                 },
                               ),
@@ -458,11 +474,68 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
         onPressed: () {
           Navigator.push(
             context,
-            MaterialPageRoute(builder: (_) => const ServiciosScreen()),
+            MaterialPageRoute(
+              builder: (_) => ServiciosScreen(fechaInicial: _diaSeleccionado),
+            ),
           );
         },
         child: const Icon(Icons.add, size: 28),
       ),
+    );
+  }
+
+  List<Color> _obtenerColoresPilotos(List<ServicioModel>? servicios, Color colorDefecto) {
+    if (servicios == null || servicios.isEmpty) return [];
+    final Set<Color> colores = {};
+    for (var s in servicios) {
+      if (s.estado == 'CANCELADO') continue;
+      if (s.pilotoColorHex != null && s.pilotoColorHex!.isNotEmpty) {
+        try {
+          final hex = s.pilotoColorHex!.replaceAll('#', '');
+          colores.add(Color(int.parse('FF$hex', radix: 16)));
+        } catch (_) {}
+      } else if (s.piloto.isNotEmpty) {
+        colores.add(colorDefecto);
+      }
+    }
+    return colores.toList();
+  }
+
+  Widget _buildDayCellContent(int dayNumber, List<Color> coloresPilotos, TextStyle textStyle) {
+    return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (coloresPilotos.isNotEmpty)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: coloresPilotos.take(3).map((col) {
+              return Container(
+                width: 5.5,
+                height: 5.5,
+                margin: const EdgeInsets.symmetric(horizontal: 1.0, vertical: 1.0),
+                decoration: BoxDecoration(
+                  color: col,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 0.6),
+                  boxShadow: [
+                    BoxShadow(
+                      color: col.withValues(alpha: 0.4),
+                      blurRadius: 2,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          )
+        else
+          const SizedBox(height: 7.5),
+        Text(
+          '$dayNumber',
+          style: textStyle,
+        ),
+      ],
     );
   }
 

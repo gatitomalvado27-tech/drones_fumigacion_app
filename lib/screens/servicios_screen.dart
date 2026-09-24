@@ -4,6 +4,8 @@ import 'package:intl/intl.dart';
 import 'package:table_calendar/table_calendar.dart';
 import '../models/servicio_model.dart';
 import '../models/cliente_model.dart';
+import '../models/piloto_model.dart';
+import '../widgets/gestion_pilotos_dialog.dart';
 import '../utils/crop_helper.dart';
 import '../utils/time_picker_helper.dart';
 import '../services/notification_service.dart';
@@ -11,7 +13,8 @@ import '../utils/operaciones_helper.dart';
 import '../services/pdf_service.dart';
 
 class ServiciosScreen extends StatefulWidget {
-  const ServiciosScreen({super.key});
+  final DateTime? fechaInicial;
+  const ServiciosScreen({super.key, this.fechaInicial});
 
   @override
   State<ServiciosScreen> createState() => _ServiciosScreenState();
@@ -23,6 +26,21 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   DateTime _selectedDay = DateTime.now();
   String _filtroEstado = 'TODOS'; // 'TODOS', 'PROGRAMADO', 'EN_PROCESO', 'COMPLETADO'
   bool _filtrarPorDia = true;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.fechaInicial != null) {
+      _selectedDay = widget.fechaInicial!;
+      _focusedDay = widget.fechaInicial!;
+      _filtrarPorDia = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _mostrarDialogoAgendarServicio(context);
+        }
+      });
+    }
+  }
 
   final NumberFormat _currencyFormat = NumberFormat.currency(
     locale: 'es_CO',
@@ -621,6 +639,126 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     );
   }
 
+  Future<void> _abrirBuscadorClientes({
+    required BuildContext context,
+    required Function(ClienteModel cliente) onSeleccionado,
+  }) async {
+    String query = '';
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                top: 16,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+              ),
+              child: SizedBox(
+                height: MediaQuery.of(context).size.height * 0.65,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Buscar y Seleccionar Cliente',
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        hintText: 'Escribe nombre, finca o teléfono...',
+                        prefixIcon: const Icon(Icons.search),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      ),
+                      onChanged: (val) {
+                        setSheetState(() => query = val.toLowerCase().trim());
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance.collection('clientes').snapshots(),
+                        builder: (context, snap) {
+                          if (!snap.hasData) {
+                            return const Center(child: CircularProgressIndicator());
+                          }
+                          final docs = snap.data!.docs;
+                          final clientes = docs.map((d) => ClienteModel.fromMap(d.id, d.data() as Map<String, dynamic>)).toList();
+                          final filtrados = clientes.where((c) {
+                            if (query.isEmpty) return true;
+                            return c.nombre.toLowerCase().contains(query) ||
+                                c.ubicacion.toLowerCase().contains(query) ||
+                                c.telefono.toLowerCase().contains(query);
+                          }).toList();
+
+                          if (filtrados.isEmpty) {
+                            return Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.person_off_outlined, size: 48, color: Colors.grey.shade400),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    query.isEmpty ? 'No hay clientes registrados.' : 'No se encontraron clientes con "$query"',
+                                    style: TextStyle(color: Colors.grey.shade600),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+
+                          return ListView.separated(
+                            itemCount: filtrados.length,
+                            separatorBuilder: (ctx, i) => const Divider(height: 1),
+                            itemBuilder: (context, i) {
+                              final c = filtrados[i];
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  backgroundColor: const Color(0xFF2E7D32).withValues(alpha: 0.15),
+                                  child: Text(
+                                    c.nombre.isNotEmpty ? c.nombre[0].toUpperCase() : '?',
+                                    style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                title: Text(c.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                subtitle: Text('📍 ${c.ubicacion}  •  📞 ${c.telefono}'),
+                                onTap: () {
+                                  onSeleccionado(c);
+                                  Navigator.pop(ctx);
+                                },
+                              );
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _mostrarDialogoAgendarServicio(BuildContext context, {ServicioModel? servicioAEditar}) {
     final formKey = GlobalKey<FormState>();
 
@@ -642,6 +780,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     String estado = servicioAEditar?.estado ?? 'PROGRAMADO';
     bool pagado = servicioAEditar?.pagado ?? false;
     String piloto = servicioAEditar?.piloto ?? '';
+    String? pilotoColorHex = servicioAEditar?.pilotoColorHex;
     String dron = servicioAEditar?.dron ?? 'DJI Agras T40';
 
     final dronesDisponibles = [
@@ -713,7 +852,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                       ),
                       const SizedBox(height: 12),
 
-                      // Selector de Cliente de Firestore (o campos editables si ya existe)
+                      // Selector y Buscador de Cliente
                       if (servicioAEditar != null) ...[
                         TextFormField(
                           initialValue: clienteNombre,
@@ -735,48 +874,102 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           onSaved: (val) => fincaUbicacion = val ?? '',
                         ),
                       ] else ...[
-                        StreamBuilder<QuerySnapshot>(
-                          stream: FirebaseFirestore.instance.collection('clientes').snapshots(),
-                          builder: (context, snapClientes) {
-                            if (!snapClientes.hasData) {
-                              return const Center(child: LinearProgressIndicator());
-                            }
-
-                            final docs = snapClientes.data!.docs;
-                            final clientes = docs.map((d) => ClienteModel.fromMap(d.id, d.data() as Map<String, dynamic>)).toList();
-
-                            return DropdownButtonFormField<String>(
-                              decoration: const InputDecoration(
-                                labelText: 'Seleccionar Cliente / Finca',
-                                prefixIcon: Icon(Icons.person),
-                                border: OutlineInputBorder(),
+                        if (clienteNombre.isEmpty) ...[
+                          InkWell(
+                            onTap: () => _abrirBuscadorClientes(
+                              context: context,
+                              onSeleccionado: (c) {
+                                setModalState(() {
+                                  clienteId = c.id ?? '';
+                                  clienteNombre = c.nombre;
+                                  clienteTelefono = c.telefono;
+                                  fincaUbicacion = c.ubicacion;
+                                });
+                              },
+                            ),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.green.shade400, width: 1.5),
+                                borderRadius: BorderRadius.circular(12),
+                                color: Colors.green.shade50.withValues(alpha: 0.5),
                               ),
-                              items: clientes.map((c) {
-                                return DropdownMenuItem(
-                                  value: c.id,
-                                  child: Text('${c.nombre} (${c.ubicacion})'),
-                                );
-                              }).toList(),
-                              onChanged: (val) {
-                                if (val != null) {
-                                  final sel = clientes.firstWhere((c) => c.id == val);
-                                  setModalState(() {
-                                    clienteId = sel.id ?? '';
-                                    clienteNombre = sel.nombre;
-                                    clienteTelefono = sel.telefono;
-                                    fincaUbicacion = sel.ubicacion;
-                                  });
-                                }
-                              },
-                              validator: (val) {
-                                if (clienteNombre.isEmpty) {
-                                  return 'Seleccione un cliente';
-                                }
-                                return null;
-                              },
-                            );
-                          },
-                        ),
+                              child: Row(
+                                children: [
+                                  Icon(Icons.person_search, color: Colors.green.shade800, size: 24),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Seleccionar o Buscar Cliente',
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.green.shade900),
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Toca para buscar por nombre, finca o teléfono',
+                                          style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(Icons.arrow_forward_ios, size: 14, color: Colors.green.shade700),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ] else ...[
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.green.shade50,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.green.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: const Color(0xFF2E7D32),
+                                  child: Text(
+                                    clienteNombre.isNotEmpty ? clienteNombre[0].toUpperCase() : '?',
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(clienteNombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      Text('📍 $fincaUbicacion', style: TextStyle(fontSize: 12, color: Colors.grey.shade800)),
+                                      if (clienteTelefono.isNotEmpty)
+                                        Text('📞 $clienteTelefono', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
+                                    ],
+                                  ),
+                                ),
+                                TextButton.icon(
+                                  icon: const Icon(Icons.swap_horiz, size: 16),
+                                  label: const Text('Cambiar'),
+                                  style: TextButton.styleFrom(foregroundColor: const Color(0xFF2E7D32)),
+                                  onPressed: () => _abrirBuscadorClientes(
+                                    context: context,
+                                    onSeleccionado: (c) {
+                                      setModalState(() {
+                                        clienteId = c.id ?? '';
+                                        clienteNombre = c.nombre;
+                                        clienteTelefono = c.telefono;
+                                        fincaUbicacion = c.ubicacion;
+                                      });
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
 
                       const SizedBox(height: 12),
@@ -912,39 +1105,148 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
 
                       const SizedBox(height: 12),
 
-                      // Piloto y Dron Asignado
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextFormField(
-                              initialValue: piloto,
-                              decoration: const InputDecoration(
-                                labelText: 'Piloto a Cargo',
-                                prefixIcon: Icon(Icons.person_pin),
-                                border: OutlineInputBorder(),
-                                hintText: 'Ej. Juan Pérez',
+                      // Piloto Obligatorio Registrado y Dron Asignado
+                      StreamBuilder<QuerySnapshot>(
+                        stream: FirebaseFirestore.instance
+                            .collection('pilotos')
+                            .where('activo', isEqualTo: true)
+                            .snapshots(),
+                        builder: (context, snapPilotos) {
+                          if (!snapPilotos.hasData) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 8.0),
+                              child: LinearProgressIndicator(),
+                            );
+                          }
+                          final docs = snapPilotos.data!.docs;
+                          final pilotos = docs
+                              .map((d) => PilotoModel.fromMap(d.id, d.data() as Map<String, dynamic>))
+                              .toList();
+
+                          if (pilotos.isEmpty) {
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade50,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.amber.shade400),
                               ),
-                              onChanged: (val) => piloto = val,
-                              onSaved: (val) => piloto = val ?? '',
-                            ),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              initialValue: dronesDisponibles.contains(dron) ? dron : 'DJI Agras T40',
-                              decoration: const InputDecoration(
-                                labelText: 'Dron a Usar',
-                                prefixIcon: Icon(Icons.flight),
-                                border: OutlineInputBorder(),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(Icons.warning_amber_rounded, color: Colors.amber.shade900, size: 20),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'No hay pilotos registrados',
+                                          style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber.shade900, fontSize: 13),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    'Para agendar un vuelo, primero debes registrar al piloto a cargo.',
+                                    style: TextStyle(fontSize: 12, color: Colors.amber.shade900),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.amber.shade800,
+                                        foregroundColor: Colors.white,
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                      icon: const Icon(Icons.person_add, size: 16),
+                                      label: const Text('Registrar Piloto'),
+                                      onPressed: () => GestionPilotosDialog.mostrar(context),
+                                    ),
+                                  ),
+                                ],
                               ),
-                              items: dronesDisponibles
-                                  .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontSize: 13))))
-                                  .toList(),
-                              onChanged: (val) => setModalState(() => dron = val ?? 'DJI Agras T40'),
-                              onSaved: (val) => dron = val ?? 'DJI Agras T40',
-                            ),
-                          ),
-                        ],
+                            );
+                          }
+
+                          final bool pilotoExiste = pilotos.any((p) => p.nombre == piloto);
+                          final String? valorPiloto = pilotoExiste ? piloto : null;
+
+                          return Row(
+                            children: [
+                              Expanded(
+                                child: DropdownButtonFormField<String>(
+                                  initialValue: valorPiloto,
+                                  decoration: const InputDecoration(
+                                    labelText: 'Piloto Asignado *',
+                                    prefixIcon: Icon(Icons.person_pin),
+                                    border: OutlineInputBorder(),
+                                  ),
+                                  items: pilotos.map((p) {
+                                    return DropdownMenuItem<String>(
+                                      value: p.nombre,
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            width: 12,
+                                            height: 12,
+                                            margin: const EdgeInsets.only(right: 8),
+                                            decoration: BoxDecoration(
+                                              color: p.color,
+                                              shape: BoxShape.circle,
+                                              border: Border.all(color: Colors.black26, width: 0.5),
+                                            ),
+                                          ),
+                                          Text(p.nombre, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                                        ],
+                                      ),
+                                    );
+                                  }).toList(),
+                                  onChanged: (val) {
+                                    if (val != null) {
+                                      final p = pilotos.firstWhere((item) => item.nombre == val);
+                                      setModalState(() {
+                                        piloto = p.nombre;
+                                        pilotoColorHex = p.colorHex;
+                                      });
+                                    }
+                                  },
+                                  validator: (val) {
+                                    if (piloto.isEmpty) {
+                                      return 'Selecciona un piloto';
+                                    }
+                                    return null;
+                                  },
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              IconButton(
+                                tooltip: 'Gestionar Pilotos',
+                                icon: const Icon(Icons.person_add_outlined, color: Color(0xFF2E7D32)),
+                                onPressed: () => GestionPilotosDialog.mostrar(context),
+                              ),
+                            ],
+                          );
+                        },
+                      ),
+
+                      const SizedBox(height: 12),
+
+                      // Dron a Usar
+                      DropdownButtonFormField<String>(
+                        initialValue: dronesDisponibles.contains(dron) ? dron : 'DJI Agras T40',
+                        decoration: const InputDecoration(
+                          labelText: 'Dron a Usar',
+                          prefixIcon: Icon(Icons.flight),
+                          border: OutlineInputBorder(),
+                        ),
+                        items: dronesDisponibles
+                            .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontSize: 13))))
+                            .toList(),
+                        onChanged: (val) => setModalState(() => dron = val ?? 'DJI Agras T40'),
+                        onSaved: (val) => dron = val ?? 'DJI Agras T40',
                       ),
 
                       const SizedBox(height: 12),
@@ -1052,7 +1354,25 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                             style: const TextStyle(fontSize: 16),
                           ),
                           onPressed: () async {
+                            if (clienteNombre.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text('Por favor busca y selecciona un cliente.'),
+                                  backgroundColor: Colors.redAccent,
+                                ),
+                              );
+                              return;
+                            }
                             if (formKey.currentState!.validate()) {
+                              if (piloto.isEmpty) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Por favor selecciona un piloto registrado.'),
+                                    backgroundColor: Colors.redAccent,
+                                  ),
+                                );
+                                return;
+                              }
                               formKey.currentState!.save();
 
                               final fechaHora = DateTime(
@@ -1081,6 +1401,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                 notas: notas,
                                 metodoPago: metodoPago,
                                 piloto: piloto,
+                                pilotoColorHex: pilotoColorHex,
                                 dron: dron,
                               );
 

@@ -135,93 +135,85 @@ class _AgendaScreenState extends State<AgendaScreen> {
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
 
-            // FILTROS RÁPIDOS
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 20.0),
-              child: Row(
-                children: ['Todos', 'Activos', 'Inactivos'].map((filtro) {
-                  final seleccionado = _filtroRapido == filtro;
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 8.0),
-                    child: ChoiceChip(
-                      label: Text(filtro),
-                      selected: seleccionado,
-                      selectedColor: primary.withValues(alpha: 0.2),
-                      backgroundColor: cardBg,
-                      labelStyle: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: seleccionado ? primary : onSurfaceVariant,
-                      ),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(20),
-                        side: BorderSide(color: seleccionado ? primary : borderColor.withValues(alpha: 0.5)),
-                      ),
-                      onSelected: (val) {
-                        if (val) setState(() => _filtroRapido = filtro);
-                      },
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-
-            const SizedBox(height: 8),
-
-            // ORDENAMIENTO INTELIGENTE
+            // BARRA DE FILTROS Y ORDENAMIENTO COMPACTA Y ELEGANTE
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20.0),
-              child: SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: Row(
-                  children: [
-                    Icon(Icons.sort, size: 16, color: onSurfaceVariant),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Ordenar:',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: onSurfaceVariant),
+              child: Row(
+                children: [
+                  // Selector Segmentado de Estado
+                  Container(
+                    height: 38,
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: borderColor.withValues(alpha: 0.3)),
                     ),
-                    const SizedBox(width: 8),
-                    ...[
-                      {'id': 'HECTAREAS', 'label': '🌾 Más Hectáreas'},
-                      {'id': 'FRECUENCIA', 'label': '🚁 Más Frecuente'},
-                      {'id': 'FACTURACION', 'label': '💰 Mayor Facturación'},
-                      {'id': 'DEUDA', 'label': '⚠️ Mayor Deuda'},
-                      {'id': 'NOMBRE', 'label': '🔤 Alfabético'},
-                    ].map((item) {
-                      final seleccionado = _criterioOrden == item['id'];
-                      return Padding(
-                        padding: const EdgeInsets.only(right: 6.0),
-                        child: ChoiceChip(
-                          label: Text(item['label']!),
-                          selected: seleccionado,
-                          selectedColor: primary.withValues(alpha: 0.2),
-                          backgroundColor: cardBg,
-                          labelStyle: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: seleccionado ? primary : onSurfaceVariant,
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: ['Todos', 'Activos', 'Inactivos'].map((filtro) {
+                        final seleccionado = _filtroRapido == filtro;
+                        return GestureDetector(
+                          onTap: () => setState(() => _filtroRapido = filtro),
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 200),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: seleccionado ? primary : Colors.transparent,
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            child: Text(
+                              filtro,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: seleccionado ? FontWeight.bold : FontWeight.w500,
+                                color: seleccionado ? Colors.white : onSurfaceVariant,
+                              ),
+                            ),
                           ),
-                          visualDensity: VisualDensity.compact,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
-                            side: BorderSide(color: seleccionado ? primary : borderColor.withValues(alpha: 0.4)),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+
+                  const Spacer(),
+
+                  // Botón Modal de Ordenamiento
+                  InkWell(
+                    onTap: () => _mostrarModalOrden(context),
+                    borderRadius: BorderRadius.circular(20),
+                    child: Container(
+                      height: 38,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: primary.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: primary.withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.swap_vert_rounded, size: 16, color: primary),
+                          const SizedBox(width: 4),
+                          Text(
+                            _obtenerEtiquetaOrden(_criterioOrden),
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.bold,
+                              color: primary,
+                            ),
                           ),
-                          onSelected: (val) {
-                            if (val) setState(() => _criterioOrden = item['id']!);
-                          },
-                        ),
-                      );
-                    }),
-                  ],
-                ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 10),
 
             // LISTA DE CLIENTES EN TIEMPO REAL CON HISTORIAL DE SERVICIOS
             Expanded(
@@ -1422,6 +1414,113 @@ class _AgendaScreenState extends State<AgendaScreen> {
           ),
         ],
       ),
+    );
+  }
+
+  String _obtenerEtiquetaOrden(String id) {
+    switch (id) {
+      case 'HECTAREAS':
+        return '🌾 Hectáreas';
+      case 'FRECUENCIA':
+        return '🚁 Frecuencia';
+      case 'FACTURACION':
+        return '💰 Facturación';
+      case 'DEUDA':
+        return '⚠️ Deuda';
+      case 'NOMBRE':
+        return '🔤 A - Z';
+      default:
+        return 'Ordenar';
+    }
+  }
+
+  void _mostrarModalOrden(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    final onSurface = Theme.of(context).colorScheme.onSurface;
+    final cardBg = Theme.of(context).colorScheme.surface;
+
+    final opciones = [
+      {'id': 'HECTAREAS', 'label': 'Más Hectáreas Fumigadas', 'emoji': '🌾', 'sub': 'Clientes con mayor área acumulada'},
+      {'id': 'FRECUENCIA', 'label': 'Más Frecuente', 'emoji': '🚁', 'sub': 'Mayor cantidad de servicios realizados'},
+      {'id': 'FACTURACION', 'label': 'Mayor Facturación Total', 'emoji': '💰', 'sub': 'Mayor volumen de dinero generado'},
+      {'id': 'DEUDA', 'label': 'Mayor Saldo Pendiente', 'emoji': '⚠️', 'sub': 'Priorizar cobranza de cartera'},
+      {'id': 'NOMBRE', 'label': 'Orden Alfabético', 'emoji': '🔤', 'sub': 'De la A a la Z por nombre'},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: cardBg,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 16.0),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.sort_rounded, color: primary, size: 22),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Ordenar Clientes',
+                          style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: onSurface),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+                const Divider(),
+                ...opciones.map((op) {
+                  final seleccionada = _criterioOrden == op['id'];
+                  return ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    leading: Container(
+                      width: 38,
+                      height: 38,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: seleccionada ? primary.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Text(op['emoji']!, style: const TextStyle(fontSize: 18)),
+                    ),
+                    title: Text(
+                      op['label']!,
+                      style: TextStyle(
+                        fontWeight: seleccionada ? FontWeight.bold : FontWeight.w500,
+                        color: seleccionada ? primary : onSurface,
+                        fontSize: 14,
+                      ),
+                    ),
+                    subtitle: Text(
+                      op['sub']!,
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                    trailing: seleccionada
+                        ? Icon(Icons.check_circle_rounded, color: primary, size: 22)
+                        : null,
+                    onTap: () {
+                      setState(() => _criterioOrden = op['id']!);
+                      Navigator.pop(ctx);
+                    },
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 }

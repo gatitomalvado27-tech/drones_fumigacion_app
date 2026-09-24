@@ -47,7 +47,7 @@ $tag = "v$versionName"
 $repoReleases = "gatitomalvado27-tech/icaro-proagro-releases"
 
 Write-Host "`n[3/4] Publicando $tag en GitHub Releases ($repoReleases)..." -ForegroundColor Cyan
-gh release create $tag $apkPath --repo $repoReleases --title "Icaro Proagro $tag" --notes "$Notas" --clobber
+gh release create $tag $apkPath --repo $repoReleases --title "Icaro Proagro $tag" --notes "$Notas"
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "`nError subiendo la Release a GitHub." -ForegroundColor Red

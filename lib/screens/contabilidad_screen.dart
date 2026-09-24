@@ -7,6 +7,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../theme/agro_theme.dart';
 import '../models/transaccion_model.dart';
 import '../models/servicio_model.dart';
+import '../models/deuda_model.dart';
+import '../models/cliente_model.dart';
 import '../services/pdf_service.dart';
 import '../services/notification_service.dart';
 import '../utils/crop_helper.dart';
@@ -25,6 +27,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
   String _filtroPeriodo = 'ESTE_MES'; // 'HOY', 'ESTA_SEMANA', 'ESTE_MES', 'MES_PASADO', 'ESTE_ANO', 'TODO', 'PERSONALIZADO'
   String _filtroJornada = 'TODO'; // 'TODO', 'MANANA', 'TARDE'
   String _filtroCuenta = 'TODAS'; // 'TODAS', 'EFECTIVO', 'BANCOLOMBIA', 'NEQUI', etc.
+  String _filtroCategoriaEgreso = 'TODAS'; // 'TODAS', 'COMBUSTIBLE', 'MANTENIMIENTO', etc.
   String _busqueda = '';
   DateTimeRange? _rangoPersonalizado;
   int _semanaOffset = 0; // 0 = actual, -1 = semana anterior, -2 = hace 2 semanas, etc.
@@ -34,6 +37,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
     if (_filtroJornada != 'TODO') count++;
     if (_filtroTipo != 'TODOS') count++;
     if (_filtroCuenta != 'TODAS') count++;
+    if (_filtroCategoriaEgreso != 'TODAS') count++;
     return count;
   }
 
@@ -53,6 +57,20 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
   void dispose() {
     _tabController.dispose();
     super.dispose();
+  }
+
+  void _sincronizarSemanaSegunPeriodo() {
+    final now = DateTime.now();
+    if (_filtroPeriodo == 'HOY' || _filtroPeriodo == 'ESTA_SEMANA' || _filtroPeriodo == 'ESTE_MES' || _filtroPeriodo == 'ESTE_ANO' || _filtroPeriodo == 'TODO') {
+      _semanaOffset = 0;
+    } else if (_filtroPeriodo == 'MES_PASADO') {
+      final mesPasado = DateTime(now.year, now.month - 1, 15);
+      final diffDias = mesPasado.difference(now).inDays;
+      _semanaOffset = (diffDias / 7).round();
+    } else if (_filtroPeriodo == 'PERSONALIZADO' && _rangoPersonalizado != null) {
+      final diffDias = _rangoPersonalizado!.start.difference(now).inDays;
+      _semanaOffset = (diffDias / 7).floor();
+    }
   }
 
   DateTime _obtenerLunesSemana(int offset) {
@@ -367,6 +385,11 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                           label: TransaccionModel.nombreMetodo(_filtroCuenta),
                           onDeleted: () => setState(() => _filtroCuenta = 'TODAS'),
                         ),
+                      if (_filtroCategoriaEgreso != 'TODAS')
+                        _buildActiveChip(
+                          label: 'Gasto: $_filtroCategoriaEgreso',
+                          onDeleted: () => setState(() => _filtroCategoriaEgreso = 'TODAS'),
+                        ),
                       TextButton(
                         style: TextButton.styleFrom(
                           padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -378,6 +401,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                             _filtroJornada = 'TODO';
                             _filtroTipo = 'TODOS';
                             _filtroCuenta = 'TODAS';
+                            _filtroCategoriaEgreso = 'TODAS';
                           });
                         },
                         child: const Text('Limpiar filtros', style: TextStyle(fontSize: 11, color: AgroTheme.error)),
@@ -586,6 +610,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                       setState(() {
                         _rangoPersonalizado = picked;
                         _filtroPeriodo = 'PERSONALIZADO';
+                        _sincronizarSemanaSegunPeriodo();
                       });
                     }
                   },
@@ -647,9 +672,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
         } else {
           setState(() {
             _filtroPeriodo = key;
-            if (key == 'ESTA_SEMANA') {
-              _semanaOffset = 0;
-            }
+            _sincronizarSemanaSegunPeriodo();
           });
           Navigator.pop(ctx);
         }
@@ -706,6 +729,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                                 _filtroJornada = 'TODO';
                                 _filtroTipo = 'TODOS';
                                 _filtroCuenta = 'TODAS';
+                                _filtroCategoriaEgreso = 'TODAS';
                               });
                               setState(() {});
                             },
@@ -814,6 +838,40 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                           ),
                           onSelected: (val) {
                             setModalState(() => _filtroCuenta = val ? cuentaKey : 'TODAS');
+                            setState(() {});
+                          },
+                        );
+                      }).toList(),
+                    ),
+
+                    const SizedBox(height: 16),
+
+                    // SECCIÓN 4: CATEGORÍA DE GASTOS / EGRESOS
+                    Text('Categoría de Gastos / Egresos', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: onSurface)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        'TODAS', 'COMBUSTIBLE', 'MANTENIMIENTO', 'PILOTO', 'INSUMOS', 'BATERIAS', 'VIATICOS', 'REPUESTOS', 'CASA', 'OTROS'
+                      ].map((catKey) {
+                        final sel = _filtroCategoriaEgreso == catKey;
+                        return ChoiceChip(
+                          label: Text(catKey == 'TODAS' ? 'Todas las Categorías' : catKey),
+                          selected: sel,
+                          selectedColor: AgroTheme.error.withValues(alpha: 0.2),
+                          backgroundColor: cardBg,
+                          labelStyle: TextStyle(
+                            fontSize: 11,
+                            fontWeight: sel ? FontWeight.bold : FontWeight.normal,
+                            color: sel ? AgroTheme.error : onSurfaceVariant,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: BorderSide(color: sel ? AgroTheme.error : borderColor.withValues(alpha: 0.3)),
+                          ),
+                          onSelected: (val) {
+                            setModalState(() => _filtroCategoriaEgreso = val ? catKey : 'TODAS');
                             setState(() {});
                           },
                         );
@@ -939,6 +997,11 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
               if (_filtroCuenta != 'TODAS') {
                 if (_filtroCuenta == 'EFECTIVO' && !t.esEfectivo) return false;
                 if (_filtroCuenta != 'EFECTIVO' && t.metodoPago != _filtroCuenta) return false;
+              }
+              if (_filtroCategoriaEgreso != 'TODAS') {
+                if (t.tipo != 'EGRESO' || !t.categoria.toUpperCase().contains(_filtroCategoriaEgreso.toUpperCase())) {
+                  return false;
+                }
               }
               if (_busqueda.isNotEmpty) {
                 final q = _busqueda.toLowerCase();
@@ -2065,68 +2128,716 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
   Widget _buildCuentasPorCobrarTab(Color cardBg, Color primary, Color onSurface, Color onSurfaceVariant, Color borderColor) {
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance.collection('servicios').snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(child: CircularProgressIndicator(color: primary));
-        }
+      builder: (context, snapshotServicios) {
+        return StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance.collection('deudas').snapshots(),
+          builder: (context, snapshotDeudas) {
+            if (snapshotServicios.connectionState == ConnectionState.waiting ||
+                snapshotDeudas.connectionState == ConnectionState.waiting) {
+              return Center(child: CircularProgressIndicator(color: primary));
+            }
 
-        final docs = snapshot.data?.docs ?? [];
-        final todosServicios = docs.map((doc) => ServicioModel.fromMap(doc.id, doc.data() as Map<String, dynamic>)).toList();
-        final pendientes = todosServicios.where((s) => !s.pagado && s.estado != 'CANCELADO').toList();
-        final totalDeuda = pendientes.fold<double>(0, (prev, s) => prev + s.saldoPendiente);
+            final docsServ = snapshotServicios.data?.docs ?? [];
+            final todosServicios = docsServ.map((doc) => ServicioModel.fromMap(doc.id, doc.data() as Map<String, dynamic>)).toList();
+            final pendientesServ = todosServicios.where((s) => !s.pagado && s.estado != 'CANCELADO').toList();
+            final totalDeudaServicios = pendientesServ.fold<double>(0, (prev, s) => prev + s.saldoPendiente);
 
-        return SingleChildScrollView(
-          padding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 12.0, bottom: 95.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // TARJETA DE RESUMEN DE CARTERA
-              Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: cardBg,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.6)),
-                  boxShadow: AgroTheme.getShadow(context),
-                ),
-                child: Column(
-                  children: [
-                    Row(
+            final docsDeudas = snapshotDeudas.data?.docs ?? [];
+            final todasDeudas = docsDeudas.map((doc) => DeudaModel.fromMap(doc.id, doc.data() as Map<String, dynamic>)).toList();
+            final deudasActivas = todasDeudas.where((d) => !d.pagada).toList();
+            // Ordenar: primero las vencidas con mayor mora
+            deudasActivas.sort((a, b) {
+              if (a.estaVencida && !b.estaVencida) return -1;
+              if (!a.estaVencida && b.estaVencida) return 1;
+              return b.diasDeuda.compareTo(a.diasDeuda);
+            });
+            final totalDeudaIndependientes = deudasActivas.fold<double>(0, (prev, d) => prev + d.saldoPendiente);
+
+            final totalCarteraGlobal = totalDeudaServicios + totalDeudaIndependientes;
+
+            return SingleChildScrollView(
+              padding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 12.0, bottom: 95.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // TARJETA DE RESUMEN DE CARTERA GLOBAL
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: cardBg,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.6)),
+                      boxShadow: AgroTheme.getShadow(context),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.pending_actions, size: 38, color: Colors.orangeAccent),
-                        const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('Total Cuánto se Debe (Cartera de Clientes)', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
-                              Text(
-                                _currencyFormat.format(totalDeuda),
-                                style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Colors.orangeAccent),
+                        Row(
+                          children: [
+                            const Icon(Icons.pending_actions, size: 38, color: Colors.orangeAccent),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Total Cartera Pendiente por Cobrar', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
+                                  Text(
+                                    _currencyFormat.format(totalCarteraGlobal),
+                                    style: const TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: Colors.orangeAccent),
+                                  ),
+                                  Text(
+                                    '${pendientesServ.length} vuelos (${_currencyFormat.format(totalDeudaServicios)}) • ${deudasActivas.length} deudas directas (${_currencyFormat.format(totalDeudaIndependientes)})',
+                                    style: TextStyle(fontSize: 10.5, color: onSurfaceVariant),
+                                  ),
+                                ],
                               ),
-                              Text('${pendientes.length} servicios pendientes o con saldo', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
-                            ],
-                          ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        const Divider(height: 1),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 6,
+                          alignment: WrapAlignment.end,
+                          children: [
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: primary,
+                                foregroundColor: Colors.black,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              icon: const Icon(Icons.add_circle_outline, size: 16),
+                              label: const Text('Registrar Nueva Deuda', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                              onPressed: () => _mostrarDialogoRegistrarDeuda(context),
+                            ),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Colors.orangeAccent),
+                                foregroundColor: Colors.orangeAccent,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              icon: const Icon(Icons.picture_as_pdf, size: 16),
+                              label: const Text('Informe Cartera (PDF)', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                              onPressed: () {
+                                PdfService.generarYCompartirCarteraGeneral(serviciosPendientes: pendientesServ);
+                              },
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    const Divider(height: 1),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Colors.orangeAccent),
-                            foregroundColor: Colors.orangeAccent,
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+
+                  // ==========================================================
+                  // SECCIÓN 1: DEUDAS Y CUENTAS DIRECTAS REGISTRADAS
+                  // ==========================================================
+                  const SizedBox(height: 22),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.assignment_late_outlined, size: 18, color: deudasActivas.isNotEmpty ? Colors.redAccent : onSurfaceVariant),
+                          const SizedBox(width: 6),
+                          Text('Deudas y Préstamos Directos', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: onSurface)),
+                        ],
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: (deudasActivas.isNotEmpty ? Colors.redAccent : onSurfaceVariant).withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          '${deudasActivas.length} activas',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: deudasActivas.isNotEmpty ? Colors.redAccent : onSurfaceVariant,
                           ),
-                          icon: const Icon(Icons.picture_as_pdf, size: 16),
-                          label: const Text('Informe General Cartera (PDF)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                          onPressed: () {
-                            PdfService.generarYCompartirCarteraGeneral(serviciosPendientes: pendientes);
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  if (deudasActivas.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: cardBg,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: borderColor.withValues(alpha: 0.3)),
+                      ),
+                      child: Column(
+                        children: [
+                          Icon(Icons.check_circle_outline, size: 28, color: primary.withValues(alpha: 0.6)),
+                          const SizedBox(height: 6),
+                          Text(
+                            'No hay deudas directas pendientes.',
+                            style: TextStyle(fontSize: 12, color: onSurfaceVariant),
+                          ),
+                          const SizedBox(height: 4),
+                          TextButton(
+                            onPressed: () => _mostrarDialogoRegistrarDeuda(context),
+                            child: const Text('+ Agregar cuenta por cobrar a cliente', style: TextStyle(fontSize: 12)),
+                          ),
+                        ],
+                      ),
+                    )
+                  else
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: deudasActivas.length,
+                      itemBuilder: (context, index) {
+                        final d = deudasActivas[index];
+                        final double pctAbonado = d.montoTotal > 0
+                            ? (d.abonos / d.montoTotal).clamp(0.0, 1.0)
+                            : 0.0;
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: cardBg,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: d.estaVencida ? Colors.redAccent.withValues(alpha: 0.7) : borderColor.withValues(alpha: 0.5),
+                              width: d.estaVencida ? 1.5 : 1.0,
+                            ),
+                            boxShadow: AgroTheme.getShadow(context),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      d.clienteNombre,
+                                      style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold, color: onSurface),
+                                    ),
+                                  ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        'Resta: ${_currencyFormat.format(d.saldoPendiente)}',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w900,
+                                          color: d.estaVencida ? Colors.redAccent : Colors.orangeAccent,
+                                        ),
+                                      ),
+                                      if (d.abonos > 0)
+                                        Text(
+                                          'Total: ${_currencyFormat.format(d.montoTotal)}',
+                                          style: TextStyle(fontSize: 10, color: onSurfaceVariant, decoration: TextDecoration.lineThrough),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text('📝 ${d.concepto}', style: TextStyle(fontSize: 12.5, color: onSurface)),
+                              const SizedBox(height: 8),
+
+                              // AVISO / CUENTA REGRESIVA DE DÍAS SIN PAGAR O VENCIMIENTO
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                children: [
+                                  if (d.estaVencida)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: Colors.red.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.warning_amber_rounded, size: 14, color: Colors.redAccent),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            '⚠️ Vencida hace ${-(d.diasRestantesVencimiento ?? 0)} días (${d.diasDeuda} días sin pagar)',
+                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: Colors.orangeAccent.withValues(alpha: 0.4)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.timer_outlined, size: 14, color: Colors.orangeAccent),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            '⏳ Vence en ${d.diasRestantesVencimiento ?? 0} días (${d.diasDeuda} días de antigüedad)',
+                                            style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.orangeAccent),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  if (d.clienteTelefono.isNotEmpty)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        '📞 ${d.clienteTelefono}',
+                                        style: TextStyle(fontSize: 10.5, color: onSurfaceVariant),
+                                      ),
+                                    ),
+                                ],
+                              ),
+
+                              // BARRA DE PROGRESO DE ABONO
+                              if (d.abonos > 0) ...[
+                                const SizedBox(height: 8),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: LinearProgressIndicator(
+                                    value: pctAbonado,
+                                    minHeight: 5,
+                                    backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('Abonado: ${_currencyFormat.format(d.abonos)}', style: const TextStyle(fontSize: 10, color: Colors.green)),
+                                    Text('${(pctAbonado * 100).toStringAsFixed(0)}% liquidado', style: TextStyle(fontSize: 10, color: onSurfaceVariant)),
+                                  ],
+                                ),
+                              ],
+
+                              const Divider(height: 16),
+
+                              // ACCIONES DE LA DEUDA
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 6,
+                                alignment: WrapAlignment.end,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  IconButton(
+                                    tooltip: 'Eliminar deuda',
+                                    icon: const Icon(Icons.delete_outline, size: 17, color: AgroTheme.error),
+                                    onPressed: () => _confirmarEliminarDeuda(d),
+                                  ),
+                                  OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      side: const BorderSide(color: Colors.green),
+                                      foregroundColor: Colors.green,
+                                    ),
+                                    icon: const Icon(Icons.chat, size: 14, color: Colors.green),
+                                    label: const Text('Recordar (WhatsApp)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                    onPressed: () => _enviarRecordatorioDeudaWhatsApp(d),
+                                  ),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.teal,
+                                      foregroundColor: Colors.white,
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    ),
+                                    icon: const Icon(Icons.payments_outlined, size: 14),
+                                    label: const Text('Abonar', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                    onPressed: () => _mostrarDialogoAbonarDeuda(d),
+                                  ),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: primary,
+                                      foregroundColor: Colors.black,
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    ),
+                                    icon: const Icon(Icons.check, size: 15),
+                                    label: const Text('Cobrar Todo', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                    onPressed: () => _liquidarDeudaCompleta(d),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+
+                  // ==========================================================
+                  // SECCIÓN 2: VUELOS / SERVICIOS CON PAGOS PENDIENTES
+                  // ==========================================================
+                  const SizedBox(height: 24),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.flight_takeoff, size: 18, color: primary),
+                          const SizedBox(width: 6),
+                          Text('Vuelos con Pagos Pendientes', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: onSurface)),
+                        ],
+                      ),
+                      Text('${pendientesServ.length} activos', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+
+                  if (pendientesServ.isEmpty)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(24),
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: cardBg,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: borderColor.withValues(alpha: 0.3)),
+                      ),
+                      child: Text('¡Excelente! No hay servicios de vuelo pendientes por cobrar.', style: TextStyle(color: onSurfaceVariant, fontSize: 12)),
+                    )
+                  else
+                    ListView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      itemCount: pendientesServ.length,
+                      itemBuilder: (context, index) {
+                        final s = pendientesServ[index];
+                        final double pctAbonado = s.precioTotal > 0
+                            ? (s.totalAbonado / s.precioTotal).clamp(0.0, 1.0)
+                            : 0.0;
+                        final int diasSinPagar = DateTime.now().difference(s.fecha).inDays;
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: cardBg,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: borderColor.withValues(alpha: 0.4)),
+                            boxShadow: AgroTheme.getShadow(context),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      s.clienteNombre,
+                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: onSurface),
+                                    ),
+                                  ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text(
+                                        'Resta: ${_currencyFormat.format(s.saldoPendiente)}',
+                                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Colors.orangeAccent),
+                                      ),
+                                      if (s.totalAbonado > 0)
+                                        Text(
+                                          'Total: ${_currencyFormat.format(s.precioTotal)}',
+                                          style: TextStyle(fontSize: 10, color: onSurfaceVariant, decoration: TextDecoration.lineThrough),
+                                        ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  CropBadge(cultivo: s.cultivo),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: s.metodoPago == 'EN_LINEA'
+                                          ? Colors.blueAccent.withValues(alpha: 0.15)
+                                          : Colors.green.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      s.metodoPago == 'EN_LINEA' ? '💳 Transferencia' : '💵 Efectivo',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: s.metodoPago == 'EN_LINEA' ? Colors.blueAccent : (Theme.of(context).brightness == Brightness.dark ? Colors.greenAccent : const Color(0xFF1B5E20)),
+                                      ),
+                                    ),
+                                  ),
+                                  // Mini aviso de días sin pagar
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: (diasSinPagar >= 7 ? Colors.redAccent : Colors.orangeAccent).withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: Text(
+                                      diasSinPagar > 0 ? '⚠️ Hace $diasSinPagar días sin pagar' : '📅 Vuelo Hoy',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        color: diasSinPagar >= 7 ? Colors.redAccent : Colors.orangeAccent,
+                                      ),
+                                    ),
+                                  ),
+                                  if (s.totalAbonado > 0)
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.green.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        'Abonado: ${_currencyFormat.format(s.totalAbonado)}',
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              Text('📍 ${s.fincaUbicacion} • ${s.hectareas} Ha', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
+
+                              // BARRA DE PROGRESO DE ABONO
+                              if (s.totalAbonado > 0) ...[
+                                const SizedBox(height: 8),
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(4),
+                                  child: LinearProgressIndicator(
+                                    value: pctAbonado,
+                                    minHeight: 6,
+                                    backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Align(
+                                  alignment: Alignment.centerRight,
+                                  child: Text(
+                                    '${(pctAbonado * 100).toStringAsFixed(0)}% pagado',
+                                    style: TextStyle(fontSize: 10, color: onSurfaceVariant),
+                                  ),
+                                ),
+                              ],
+
+                              const Divider(height: 18),
+
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 6,
+                                alignment: WrapAlignment.end,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  TextButton.icon(
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: AgroTheme.error,
+                                      visualDensity: VisualDensity.compact,
+                                    ),
+                                    icon: const Icon(Icons.cancel_outlined, size: 15),
+                                    label: const Text('Cancelar', style: TextStyle(fontSize: 12)),
+                                    onPressed: () => _cancelarServicioPorCobrar(s),
+                                  ),
+                                  IconButton(
+                                    tooltip: 'Editar Monto Total',
+                                    icon: Icon(Icons.edit_outlined, size: 17, color: primary),
+                                    onPressed: () => _mostrarDialogoEditarMontoServicio(s),
+                                  ),
+                                  OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      side: BorderSide(color: primary.withValues(alpha: 0.6)),
+                                    ),
+                                    icon: Icon(Icons.receipt_long, size: 15, color: primary),
+                                    label: Text('Estado Cuenta', style: TextStyle(color: primary, fontSize: 12, fontWeight: FontWeight.bold)),
+                                    onPressed: () => _mostrarOpcionesEstadoCuentaCliente(s, todosServicios),
+                                  ),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.teal,
+                                      foregroundColor: Colors.white,
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    ),
+                                    icon: const Icon(Icons.payments_outlined, size: 15),
+                                    label: const Text('Abonar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                    onPressed: () => _mostrarDialogoAbonarServicio(s),
+                                  ),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: primary,
+                                      foregroundColor: Colors.black,
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                    ),
+                                    icon: const Icon(Icons.check, size: 16),
+                                    label: const Text('Cobrar Todo', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                    onPressed: () => _registrarCobroServicio(s),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        );
+                      },
+                    ),
+
+                  const SizedBox(height: 95),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // ===========================================================================
+  // MÉTODOS DE GESTIÓN DE DEUDAS INDEPENDIENTES
+  // ===========================================================================
+
+  void _mostrarDialogoRegistrarDeuda(BuildContext context) async {
+    final formKey = GlobalKey<FormState>();
+    String clienteNombre = '';
+    String clienteTelefono = '';
+    String concepto = '';
+    double montoTotal = 0;
+    DateTime? fechaVencimiento = DateTime.now().add(const Duration(days: 15));
+
+    // Obtener lista de clientes registrados para sugerencias
+    final snapClientes = await FirebaseFirestore.instance.collection('clientes').get();
+    final clientesList = snapClientes.docs.map((d) => ClienteModel.fromMap(d.id, d.data())).toList();
+
+    if (!context.mounted) return;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return AlertDialog(
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            title: Row(
+              children: [
+                const Icon(Icons.note_add_outlined, color: Colors.orangeAccent),
+                const SizedBox(width: 8),
+                const Expanded(child: Text('Registrar Cuenta por Cobrar')),
+              ],
+            ),
+            content: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (clientesList.isNotEmpty) ...[
+                      DropdownButtonFormField<ClienteModel>(
+                        decoration: const InputDecoration(
+                          labelText: 'Seleccionar Cliente Registrado (Opcional)',
+                          isDense: true,
+                        ),
+                        items: clientesList.map((c) {
+                          return DropdownMenuItem(
+                            value: c,
+                            child: Text(c.nombre, overflow: TextOverflow.ellipsis),
+                          );
+                        }).toList(),
+                        onChanged: (clienteSel) {
+                          if (clienteSel != null) {
+                            setModalState(() {
+                              clienteNombre = clienteSel.nombre;
+                              clienteTelefono = clienteSel.telefono;
+                            });
+                          }
+                        },
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    TextFormField(
+                      initialValue: clienteNombre,
+                      key: ValueKey(clienteNombre),
+                      decoration: const InputDecoration(labelText: 'Nombre del Deudor / Cliente *'),
+                      validator: (val) => val == null || val.trim().isEmpty ? 'Ingrese el nombre' : null,
+                      onSaved: (val) => clienteNombre = val!.trim(),
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      initialValue: clienteTelefono,
+                      key: ValueKey('tel_$clienteTelefono'),
+                      decoration: const InputDecoration(labelText: 'Teléfono / WhatsApp (Opcional)'),
+                      keyboardType: TextInputType.phone,
+                      onSaved: (val) => clienteTelefono = val?.trim() ?? '',
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      decoration: const InputDecoration(labelText: 'Monto Total de la Deuda (\$) *', prefixText: '\$ '),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      validator: (val) {
+                        if (val == null || val.trim().isEmpty) return 'Ingrese el monto';
+                        final n = double.tryParse(val.replaceAll('.', '').replaceAll(',', '').trim());
+                        if (n == null || n <= 0) return 'Monto inválido';
+                        return null;
+                      },
+                      onSaved: (val) => montoTotal = double.parse(val!.replaceAll('.', '').replaceAll(',', '').trim()),
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      decoration: const InputDecoration(
+                        labelText: 'Concepto / Motivo de la Deuda *',
+                        hintText: 'Ej. Préstamo de insumos, saldo atrasado...',
+                      ),
+                      validator: (val) => val == null || val.trim().isEmpty ? 'Ingrese el concepto' : null,
+                      onSaved: (val) => concepto = val!.trim(),
+                    ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Fecha Límite:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                            Text(
+                              fechaVencimiento != null ? DateFormat('dd/MM/yyyy').format(fechaVencimiento!) : 'Sin límite',
+                              style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.primary, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                        TextButton.icon(
+                          icon: const Icon(Icons.event, size: 16),
+                          label: const Text('Elegir Fecha'),
+                          onPressed: () async {
+                            final pick = await showDatePicker(
+                              context: context,
+                              initialDate: fechaVencimiento ?? DateTime.now().add(const Duration(days: 15)),
+                              firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                              lastDate: DateTime.now().add(const Duration(days: 730)),
+                            );
+                            if (pick != null) {
+                              setModalState(() => fechaVencimiento = pick);
+                            }
                           },
                         ),
                       ],
@@ -2134,200 +2845,326 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                   ],
                 ),
               ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.primary,
+                  foregroundColor: Colors.black,
+                ),
+                onPressed: () async {
+                  if (formKey.currentState!.validate()) {
+                    formKey.currentState!.save();
+                    final nuevaDeuda = DeudaModel(
+                      clienteNombre: clienteNombre,
+                      clienteTelefono: clienteTelefono,
+                      concepto: concepto,
+                      montoTotal: montoTotal,
+                      fechaEmision: DateTime.now(),
+                      fechaVencimiento: fechaVencimiento,
+                    );
 
-              const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Clientes con Pagos Pendientes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: onSurface)),
-                  Text('${pendientes.length} activos', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
-                ],
+                    await FirebaseFirestore.instance.collection('deudas').add(nuevaDeuda.toMap());
+
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('¡Deuda de $clienteNombre registrada exitosamente!')),
+                      );
+                    }
+                  }
+                },
+                child: const Text('Guardar'),
               ),
-              const SizedBox(height: 10),
+            ],
+          );
+        },
+      ),
+    );
+  }
 
-              if (pendientes.isEmpty)
-                Container(
-                  padding: const EdgeInsets.all(32),
-                  alignment: Alignment.center,
-                  child: Text('¡Excelente! No hay cobros pendientes.', style: TextStyle(color: onSurfaceVariant)),
-                )
-              else
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  itemCount: pendientes.length,
-                  itemBuilder: (context, index) {
-                    final s = pendientes[index];
-                    final double pctAbonado = s.precioTotal > 0
-                        ? (s.totalAbonado / s.precioTotal).clamp(0.0, 1.0)
-                        : 0.0;
+  void _mostrarDialogoAbonarDeuda(DeudaModel deuda) {
+    final formKey = GlobalKey<FormState>();
+    final controller = TextEditingController();
+    String metodoPago = 'EFECTIVO';
+    String notaAbono = '';
 
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      padding: const EdgeInsets.all(14),
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return AlertDialog(
+            backgroundColor: Theme.of(context).colorScheme.surface,
+            title: Row(
+              children: [
+                const Icon(Icons.payments_outlined, color: Colors.teal),
+                const SizedBox(width: 8),
+                const Expanded(child: Text('Registrar Abono a Deuda')),
+              ],
+            ),
+            content: Form(
+              key: formKey,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(deuda.clienteNombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(deuda.concepto, style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant)),
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: cardBg,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: borderColor.withValues(alpha: 0.4)),
-                        boxShadow: AgroTheme.getShadow(context),
+                        color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.4),
+                        borderRadius: BorderRadius.circular(10),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  s.clienteNombre,
-                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: onSurface),
-                                ),
-                              ),
-                              Column(
-                                crossAxisAlignment: CrossAxisAlignment.end,
-                                children: [
-                                  Text(
-                                    'Resta: ${_currencyFormat.format(s.saldoPendiente)}',
-                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Colors.orangeAccent),
-                                  ),
-                                  if (s.totalAbonado > 0)
-                                    Text(
-                                      'Total: ${_currencyFormat.format(s.precioTotal)}',
-                                      style: TextStyle(fontSize: 10, color: onSurfaceVariant, decoration: TextDecoration.lineThrough),
-                                    ),
-                                ],
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Wrap(
-                            spacing: 6,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              CropBadge(cultivo: s.cultivo),
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: s.metodoPago == 'EN_LINEA'
-                                      ? Colors.blueAccent.withValues(alpha: 0.15)
-                                      : Colors.green.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(6),
-                                ),
-                                child: Text(
-                                  s.metodoPago == 'EN_LINEA' ? '💳 Transferencia' : '💵 Efectivo',
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.bold,
-                                    color: s.metodoPago == 'EN_LINEA' ? Colors.blueAccent : (Theme.of(context).brightness == Brightness.dark ? Colors.greenAccent : const Color(0xFF1B5E20)),
-                                  ),
-                                ),
-                              ),
-                              if (s.totalAbonado > 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: Colors.green.withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    'Abonado: ${_currencyFormat.format(s.totalAbonado)}',
-                                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green),
-                                  ),
-                                ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text('📍 ${s.fincaUbicacion} • ${s.hectareas} Ha', style: TextStyle(fontSize: 12, color: onSurfaceVariant)),
-
-                          // BARRA DE PROGRESO DE ABONO
-                          if (s.totalAbonado > 0) ...[
-                            const SizedBox(height: 8),
-                            ClipRRect(
-                              borderRadius: BorderRadius.circular(4),
-                              child: LinearProgressIndicator(
-                                value: pctAbonado,
-                                minHeight: 6,
-                                backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
-                                valueColor: const AlwaysStoppedAnimation<Color>(Colors.green),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Align(
-                              alignment: Alignment.centerRight,
-                              child: Text(
-                                '${(pctAbonado * 100).toStringAsFixed(0)}% pagado',
-                                style: TextStyle(fontSize: 10, color: onSurfaceVariant),
-                              ),
-                            ),
-                          ],
-
-                          const Divider(height: 18),
-
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 6,
-                            alignment: WrapAlignment.end,
-                            crossAxisAlignment: WrapCrossAlignment.center,
-                            children: [
-                              TextButton.icon(
-                                style: TextButton.styleFrom(
-                                  foregroundColor: AgroTheme.error,
-                                  visualDensity: VisualDensity.compact,
-                                ),
-                                icon: const Icon(Icons.cancel_outlined, size: 15),
-                                label: const Text('Cancelar', style: TextStyle(fontSize: 12)),
-                                onPressed: () => _cancelarServicioPorCobrar(s),
-                              ),
-                              IconButton(
-                                tooltip: 'Editar Monto Total',
-                                icon: Icon(Icons.edit_outlined, size: 17, color: primary),
-                                onPressed: () => _mostrarDialogoEditarMontoServicio(s),
-                              ),
-                              OutlinedButton.icon(
-                                style: OutlinedButton.styleFrom(
-                                  visualDensity: VisualDensity.compact,
-                                  side: BorderSide(color: primary.withValues(alpha: 0.6)),
-                                ),
-                                icon: Icon(Icons.receipt_long, size: 15, color: primary),
-                                label: Text('Estado Cuenta', style: TextStyle(color: primary, fontSize: 12, fontWeight: FontWeight.bold)),
-                                onPressed: () => _mostrarOpcionesEstadoCuentaCliente(s, todosServicios),
-                              ),
-                              ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.teal,
-                                  foregroundColor: Colors.white,
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                ),
-                                icon: const Icon(Icons.payments_outlined, size: 15),
-                                label: const Text('Abonar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                onPressed: () => _mostrarDialogoAbonarServicio(s),
-                              ),
-                              ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: primary,
-                                  foregroundColor: Colors.black,
-                                  visualDensity: VisualDensity.compact,
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                                ),
-                                icon: const Icon(Icons.check, size: 16),
-                                label: const Text('Cobrar Todo', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                                onPressed: () => _registrarCobroServicio(s),
-                              ),
-                            ],
+                          const Text('Saldo Pendiente:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                          Text(
+                            _currencyFormat.format(deuda.saldoPendiente),
+                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: Colors.orangeAccent),
                           ),
                         ],
                       ),
-                    );
-                  },
+                    ),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: controller,
+                      decoration: const InputDecoration(labelText: 'Monto a Abonar (\$)', prefixText: '\$ '),
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      validator: (val) {
+                        if (val == null || val.trim().isEmpty) return 'Ingrese el monto';
+                        final numVal = double.tryParse(val.replaceAll('.', '').replaceAll(',', '').trim());
+                        if (numVal == null || numVal <= 0) return 'Monto inválido';
+                        if (numVal > deuda.saldoPendiente + 1.0) return 'Supera el saldo (${_currencyFormat.format(deuda.saldoPendiente)})';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 10),
+                    DropdownButtonFormField<String>(
+                      initialValue: metodoPago,
+                      decoration: const InputDecoration(labelText: 'Método / Banco Recibido'),
+                      items: const [
+                        DropdownMenuItem(value: 'EFECTIVO', child: Text('💵 Efectivo (Caja General)')),
+                        DropdownMenuItem(value: 'BANCOLOMBIA', child: Text('🟡 Bancolombia')),
+                        DropdownMenuItem(value: 'NEQUI', child: Text('🟣 Nequi')),
+                        DropdownMenuItem(value: 'DAVIPLATA', child: Text('🔴 Daviplata')),
+                        DropdownMenuItem(value: 'DAVIVIENDA', child: Text('🔴 Davivienda')),
+                        DropdownMenuItem(value: 'BANCO_BOGOTA', child: Text('🔵 Banco de Bogotá')),
+                        DropdownMenuItem(value: 'BBVA', child: Text('🔵 BBVA')),
+                        DropdownMenuItem(value: 'PSE', child: Text('🌐 PSE / En Línea')),
+                      ],
+                      onChanged: (val) => setModalState(() => metodoPago = val ?? 'EFECTIVO'),
+                    ),
+                    const SizedBox(height: 10),
+                    TextFormField(
+                      decoration: const InputDecoration(labelText: 'Nota / Referencia (Opcional)'),
+                      onSaved: (val) => notaAbono = val ?? '',
+                    ),
+                  ],
                 ),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+                onPressed: () async {
+                  if (formKey.currentState!.validate()) {
+                    formKey.currentState!.save();
+                    final montoAbono = double.parse(controller.text.replaceAll('.', '').replaceAll(',', '').trim());
 
-              const SizedBox(height: 95),
+                    final nuevoTotalAbonado = deuda.abonos + montoAbono;
+                    final bool pagada = nuevoTotalAbonado >= (deuda.montoTotal - 1.0);
+                    final saldoRestante = (deuda.montoTotal - nuevoTotalAbonado).clamp(0.0, double.infinity);
+
+                    // Actualizar documento de deuda
+                    if (deuda.id != null) {
+                      await FirebaseFirestore.instance.collection('deudas').doc(deuda.id).update({
+                        'abonos': nuevoTotalAbonado,
+                        'pagada': pagada,
+                      });
+                    }
+
+                    // REGISTRAR INGRESO AUTOMÁTICO EN CONTABILIDAD
+                    final descNota = notaAbono.isNotEmpty ? ' ($notaAbono)' : '';
+                    await FirebaseFirestore.instance.collection('transacciones').add({
+                      'tipo': 'INGRESO',
+                      'categoria': 'ABONO_DEUDA',
+                      'monto': montoAbono,
+                      'descripcion': 'Abono Deuda [${deuda.concepto}] - ${deuda.clienteNombre}$descNota',
+                      'fecha': DateTime.now().toIso8601String(),
+                      'clienteNombre': deuda.clienteNombre,
+                      'metodoPago': metodoPago,
+                    });
+
+                    NotificationService.instance.notificarAbonoRegistrado(
+                      cliente: deuda.clienteNombre,
+                      monto: montoAbono,
+                      saldo: saldoRestante,
+                    );
+
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('¡Abono de ${_currencyFormat.format(montoAbono)} registrado y contabilizado como Ingreso!')),
+                      );
+                    }
+                  }
+                },
+                child: const Text('Confirmar Abono'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _liquidarDeudaCompleta(DeudaModel deuda) {
+    String metodoPago = 'EFECTIVO';
+    final montoRestante = deuda.saldoPendiente;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) => AlertDialog(
+          backgroundColor: Theme.of(context).colorScheme.surface,
+          title: const Text('¿Confirmar Pago Total de Deuda?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Se marcará como totalmente pagada la deuda de "${deuda.clienteNombre}" por un valor de ${_currencyFormat.format(montoRestante)}.'),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: metodoPago,
+                decoration: const InputDecoration(labelText: 'Medio de Pago'),
+                items: const [
+                  DropdownMenuItem(value: 'EFECTIVO', child: Text('💵 Efectivo (Caja General)')),
+                  DropdownMenuItem(value: 'BANCOLOMBIA', child: Text('🟡 Bancolombia')),
+                  DropdownMenuItem(value: 'NEQUI', child: Text('🟣 Nequi')),
+                  DropdownMenuItem(value: 'DAVIPLATA', child: Text('🔴 Daviplata')),
+                  DropdownMenuItem(value: 'PSE', child: Text('🌐 Transferencia / PSE')),
+                ],
+                onChanged: (val) => setModalState(() => metodoPago = val ?? 'EFECTIVO'),
+              ),
             ],
           ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.primary, foregroundColor: Colors.black),
+              onPressed: () async {
+                if (deuda.id != null) {
+                  await FirebaseFirestore.instance.collection('deudas').doc(deuda.id).update({
+                    'abonos': deuda.montoTotal,
+                    'pagada': true,
+                  });
+                }
+
+                // REGISTRAR INGRESO EN CONTABILIDAD
+                await FirebaseFirestore.instance.collection('transacciones').add({
+                  'tipo': 'INGRESO',
+                  'categoria': 'ABONO_DEUDA',
+                  'monto': montoRestante,
+                  'descripcion': 'Cobro Total Deuda [${deuda.concepto}] - ${deuda.clienteNombre}',
+                  'fecha': DateTime.now().toIso8601String(),
+                  'clienteNombre': deuda.clienteNombre,
+                  'metodoPago': metodoPago,
+                });
+
+                NotificationService.instance.notificarAbonoRegistrado(
+                  cliente: deuda.clienteNombre,
+                  monto: montoRestante,
+                  saldo: 0.0,
+                );
+
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (!context.mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('¡Deuda de ${deuda.clienteNombre} cancelada y registrada en Ingresos!')),
+                );
+              },
+              child: const Text('Confirmar Cobro'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _enviarRecordatorioDeudaWhatsApp(DeudaModel deuda) async {
+    final buffer = StringBuffer();
+    buffer.writeln('🚁 *ICARO PROAGRO - RECORDATORIO DE PAGO* 🌾');
+    buffer.writeln('Estimado/a *${deuda.clienteNombre}*, un cordial saludo.');
+    buffer.writeln('Le recordamos que a la fecha presenta un saldo pendiente con nosotros:');
+    buffer.writeln('');
+    buffer.writeln('📌 *Concepto:* ${deuda.concepto}');
+    buffer.writeln('💰 *Saldo Pendiente:* ${_currencyFormat.format(deuda.saldoPendiente)}');
+    if (deuda.abonos > 0) {
+      buffer.writeln('💵 *Ya abonado previamente:* ${_currencyFormat.format(deuda.abonos)}');
+      buffer.writeln('📊 *Monto Total:* ${_currencyFormat.format(deuda.montoTotal)}');
+    }
+    buffer.writeln('📅 *Fecha de Registro:* ${DateFormat("dd/MM/yyyy").format(deuda.fechaEmision)} (${deuda.diasDeuda} días transcurridos)');
+    if (deuda.fechaVencimiento != null) {
+      if (deuda.estaVencida) {
+        buffer.writeln('⚠️ *Estado:* Vencido hace ${-(deuda.diasRestantesVencimiento ?? 0)} días (Límite: ${DateFormat("dd/MM/yyyy").format(deuda.fechaVencimiento!)})');
+      } else {
+        buffer.writeln('⏳ *Fecha Límite:* ${DateFormat("dd/MM/yyyy").format(deuda.fechaVencimiento!)} (Restan ${deuda.diasRestantesVencimiento ?? 0} días)');
+      }
+    }
+    buffer.writeln('----------------------------------------');
+    buffer.writeln('📲 _Agradecemos comunicarse con nosotros para acordar el pago o reportar su comprobante de transferencia._');
+    buffer.writeln('¡Muchas gracias por su atención!');
+
+    final texto = Uri.encodeComponent(buffer.toString());
+    final telLimpio = deuda.clienteTelefono.replaceAll(RegExp(r'[^0-9]'), '');
+    final uri = telLimpio.isNotEmpty
+        ? Uri.parse('https://wa.me/57$telLimpio?text=$texto')
+        : Uri.parse('https://wa.me/?text=$texto');
+
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (e) {
+      if (mounted) {
+        Clipboard.setData(ClipboardData(text: buffer.toString()));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mensaje copiado al portapapeles para WhatsApp')),
         );
-      },
+      }
+    }
+  }
+
+  void _confirmarEliminarDeuda(DeudaModel deuda) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Theme.of(context).colorScheme.surface,
+        title: const Text('Eliminar Registro de Deuda'),
+        content: Text('¿Deseas eliminar la deuda de "${deuda.clienteNombre}" (${deuda.concepto}) por ${_currencyFormat.format(deuda.saldoPendiente)}?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AgroTheme.error, foregroundColor: Colors.white),
+            onPressed: () async {
+              if (deuda.id != null) {
+                await FirebaseFirestore.instance.collection('deudas').doc(deuda.id).delete();
+              }
+              if (ctx.mounted) Navigator.pop(ctx);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Deuda eliminada del registro')),
+                );
+              }
+            },
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
     );
   }
 
