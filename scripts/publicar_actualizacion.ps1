@@ -86,6 +86,9 @@ if (-not $remoteUrl) {
     git push origin HEAD
 }
 
+# Asegurar que el repositorio sea público para descargas directas sin error 404
+gh repo edit --visibility public --accept-visibility-change-consequences 2>$null
+
 # Crear el release en GitHub con el APK adjunto
 gh release create $newVersionTag $apkPath --title "Icaro Proagro $newVersionTag" --notes "$Notas"
 

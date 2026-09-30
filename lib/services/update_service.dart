@@ -1,4 +1,4 @@
-import 'dart:io' show Platform;
+import 'dart:io' show Platform, HttpClient;
 import 'package:flutter/foundation.dart' show kIsWeb, debugPrint;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -117,15 +117,34 @@ class UpdateService {
   /// Inicia el flujo de descarga e instalación con ota_update
   static Stream<OtaEvent>? descargarEInstalarOta(String apkUrl) {
     if (kIsWeb || !Platform.isAndroid) return null;
+    return _ejecutarOta(apkUrl);
+  }
+
+  static Stream<OtaEvent> _ejecutarOta(String apkUrl) async* {
     try {
-      return OtaUpdate().execute(
-        apkUrl,
+      String urlFinal = apkUrl.trim();
+      // Resolver redirecciones de GitHub Releases (302 -> S3/Azure Blob direct download)
+      try {
+        final client = HttpClient();
+        client.userAgent = 'IcaroProagroApp';
+        final request = await client.getUrl(Uri.parse(urlFinal));
+        request.followRedirects = true;
+        request.maxRedirects = 5;
+        final response = await request.close();
+        if (response.redirects.isNotEmpty) {
+          urlFinal = response.redirects.last.location.toString();
+        }
+      } catch (e) {
+        debugPrint('Aviso al resolver redirección OTA: $e');
+      }
+
+      yield* OtaUpdate().execute(
+        urlFinal,
         destinationFilename: 'IcaroProagro_update.apk',
         androidProviderAuthority: 'com.example.drones_fumigacion_app.ota_update_provider',
       );
     } catch (e) {
       debugPrint('Error iniciando OtaUpdate: $e');
-      return null;
     }
   }
 
