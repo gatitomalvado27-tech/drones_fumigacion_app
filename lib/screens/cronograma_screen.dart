@@ -13,6 +13,8 @@ import 'package:url_launcher/url_launcher.dart';
 import 'servicios_screen.dart';
 import '../widgets/gestion_pilotos_dialog.dart';
 import '../models/piloto_model.dart';
+import '../widgets/registro_bitacora_dialog.dart';
+import 'bitacoras_historial_screen.dart';
 
 class CronogramaScreen extends StatefulWidget {
   const CronogramaScreen({super.key});
@@ -117,6 +119,28 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                           style: TextStyle(color: primary, fontSize: 11, fontWeight: FontWeight.bold),
                         ),
                         onPressed: () => GestionPilotosDialog.mostrar(context),
+                      ),
+                      const SizedBox(width: 6),
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: Colors.teal.withValues(alpha: 0.8)),
+                          backgroundColor: Colors.teal.withValues(alpha: 0.1),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          minimumSize: Size.zero,
+                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        ),
+                        icon: const Icon(Icons.history_edu_rounded, size: 14, color: Colors.teal),
+                        label: const Text(
+                          'Bitácoras',
+                          style: TextStyle(color: Colors.teal, fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const BitacorasHistorialScreen()),
+                          );
+                        },
                       ),
                       const SizedBox(width: 6),
                       OutlinedButton.icon(
@@ -660,20 +684,39 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                   ),
                 ],
               ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: badgeBg,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  estadoText,
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: badgeColor,
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: badgeBg,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Text(
+                      estadoText,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                        color: badgeColor,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 4),
+                  // BOTÓN DE ELIMINACIÓN INTELIGENTE (Diseño limpio y no agolpado)
+                  IconButton(
+                    visualDensity: VisualDensity.compact,
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                    icon: Icon(
+                      Icons.delete_outline_rounded,
+                      size: 19,
+                      color: Colors.red.withValues(alpha: 0.8),
+                    ),
+                    tooltip: 'Eliminar programación',
+                    onPressed: () => _confirmarEliminarServicio(context, s),
+                  ),
+                ],
               ),
             ],
           ),
@@ -736,8 +779,8 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
             ],
           ),
 
-          // CHIPS DE PILOTO Y DRON ASIGNADO
-          if (s.piloto.isNotEmpty || s.dron.isNotEmpty) ...[
+          // CHIPS DE PILOTO, DRON Y ACCESO A BITÁCORA
+          if (s.piloto.isNotEmpty || s.dron.isNotEmpty || s.estado == 'COMPLETADO') ...[
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
@@ -784,13 +827,48 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                       ],
                     ),
                   ),
+                if (s.estado == 'COMPLETADO') ...[
+                  InkWell(
+                    onTap: () => RegistroBitacoraDialog.mostrar(context, s),
+                    borderRadius: BorderRadius.circular(6),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: (s.bitacora != null ? Colors.teal : Colors.amber).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
+                          color: (s.bitacora != null ? Colors.teal : Colors.amber).withValues(alpha: 0.6),
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            s.bitacora != null ? Icons.history_edu_rounded : Icons.note_add_outlined,
+                            size: 12,
+                            color: s.bitacora != null ? Colors.teal : Colors.amber.shade800,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            s.bitacora != null ? 'Bitácora Registrada' : '+ Agregar Bitácora',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: s.bitacora != null ? Colors.teal : (isDark ? Colors.amber : Colors.amber.shade900),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ],
             ),
           ],
 
           const Divider(height: 18),
 
-          // BOTONERA DE ACCIONES: CALCULADORA, WHATSAPP, REPROGRAMAR, EDITAR Y ESTADO
+          // BOTONERA DE ACCIONES: CALCULADORA, WHATSAPP, REPROGRAMAR, EDITAR, ESTADO Y ELIMINAR
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -806,6 +884,12 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                   icon: const Icon(Icons.chat_outlined, size: 20),
                   color: Colors.green,
                   onPressed: () => _mostrarOpcionesCompartir(context, s),
+                ),
+                IconButton(
+                  tooltip: 'Eliminar Vuelo',
+                  icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                  color: Colors.red.withValues(alpha: 0.75),
+                  onPressed: () => _confirmarEliminarServicio(context, s),
                 ),
                 const SizedBox(width: 4),
                 OutlinedButton.icon(
@@ -843,6 +927,135 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                 ),
               ],
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmarEliminarServicio(BuildContext context, ServicioModel s) {
+    final isDark = AgroTheme.isDark(context);
+    final text = AgroTheme.getText(context);
+    final subtext = AgroTheme.getSubtext(context);
+    final cardBg = AgroTheme.getCard(context);
+
+    final horaFormateada = DateFormat("EEEE, d 'de' MMMM - hh:mm a", 'es').format(s.fecha);
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: cardBg,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 22),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                '¿Eliminar Programación?',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '¿Estás seguro de eliminar este vuelo agendado?',
+              style: TextStyle(fontSize: 13, color: text),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: AgroTheme.getBorder(context).withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('🌱 ${s.cultivo} • ${s.fincaUbicacion}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: text)),
+                  Text('🧑‍🌾 Cliente: ${s.clienteNombre} (${s.hectareas} Ha)', style: TextStyle(fontSize: 11, color: subtext)),
+                  Text('🗓️ $horaFormateada', style: TextStyle(fontSize: 11, color: subtext)),
+                ],
+              ),
+            ),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: isDark ? 0.12 : 0.05),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 18),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Se removerá del calendario y se anularán los recordatorios vinculados a este vuelo.',
+                      style: TextStyle(fontSize: 11, color: isDark ? Colors.red.shade200 : Colors.red.shade800),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('Cancelar', style: TextStyle(color: subtext)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              Navigator.pop(ctx);
+              if (s.id != null) {
+                // 1. Eliminar servicio de Firestore
+                await FirebaseFirestore.instance.collection('servicios').doc(s.id).delete();
+
+                // 2. Eliminar transacciones si existieran
+                final snapTrans = await FirebaseFirestore.instance
+                    .collection('transacciones')
+                    .where('servicioId', isEqualTo: s.id)
+                    .get();
+                for (var doc in snapTrans.docs) {
+                  await doc.reference.delete();
+                }
+
+                // 3. Eliminar bitacora_vuelo si existiera
+                await FirebaseFirestore.instance.collection('bitacoras_vuelo').doc(s.id).delete();
+
+                // 4. Cancelar notificación
+                await NotificationService.instance.cancelarRecordatorioVuelo(s.id!);
+
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Vuelo de ${s.clienteNombre} eliminado del cronograma.'),
+                      backgroundColor: Colors.red.shade700,
+                    ),
+                  );
+                }
+              }
+            },
+            child: const Text('Eliminar', style: TextStyle(fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -896,17 +1109,114 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                         ),
                       );
                     }
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  } else if (st == 'COMPLETADO') {
+                    await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
+                      'estado': 'COMPLETADO',
+                    });
+                    s.estado = 'COMPLETADO';
+                    if (ctx.mounted) Navigator.pop(ctx);
+
+                    // Ofrecer registrar la bitácora o completarlo sin ella
+                    if (context.mounted) {
+                      _ofrecerRegistroBitacora(context, s);
+                    }
                   } else {
                     await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
                       'estado': st,
                     });
+                    if (ctx.mounted) Navigator.pop(ctx);
                   }
+                } else {
+                  if (ctx.mounted) Navigator.pop(ctx);
                 }
-                if (ctx.mounted) Navigator.pop(ctx);
               },
             );
           }).toList(),
         ),
+      ),
+    );
+  }
+
+  void _ofrecerRegistroBitacora(BuildContext context, ServicioModel s) {
+    final isDark = AgroTheme.isDark(context);
+    final text = AgroTheme.getText(context);
+    final cardBg = AgroTheme.getCard(context);
+
+    showDialog(
+      context: context,
+      builder: (modalCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        backgroundColor: cardBg,
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF2E7D32).withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(Icons.check_circle_outline, color: Color(0xFF2E7D32), size: 22),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                '¡Vuelo Completado!',
+                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: text),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'El vuelo de ${s.cultivo} para ${s.clienteNombre} (${s.hectareas} Ha) ha sido marcado como completado.',
+              style: TextStyle(fontSize: 13, color: text),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.teal.withValues(alpha: isDark ? 0.15 : 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.teal.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.history_edu_rounded, color: Colors.teal, size: 20),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      '¿Deseas registrar la Bitácora de lo que pasó en el vuelo (hectáreas reales, clima, baterías, novedades)?',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(modalCtx),
+            child: const Text('Omitir / Solo Completar', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D32),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            icon: const Icon(Icons.edit_note, size: 18),
+            label: const Text('Registrar Bitácora', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () {
+              Navigator.pop(modalCtx);
+              RegistroBitacoraDialog.mostrar(context, s);
+            },
+          ),
+        ],
       ),
     );
   }

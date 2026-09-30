@@ -13,6 +13,7 @@ import 'pin_login_screen.dart';
 import '../utils/operaciones_helper.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
+import 'bitacoras_historial_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback onVerTodasTareas;
@@ -554,13 +555,44 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(
-                    'Próximas Tareas',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: text,
-                    ),
+                  Row(
+                    children: [
+                      Text(
+                        'Próximas Tareas',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: text,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Acceso directo al Historial Inteligente de Bitácoras
+                      InkWell(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const BitacorasHistorialScreen()),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.teal.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.teal.withValues(alpha: 0.4)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.history_edu_rounded, size: 13, color: Colors.teal),
+                              SizedBox(width: 4),
+                              Text('Bitácoras', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal)),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                   TextButton(
                     onPressed: widget.onVerTodasTareas,
@@ -579,7 +611,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
               const SizedBox(height: 10),
 
-              // LISTA DE TAREAS EN TIEMPO REAL (Filtrada inteligentemente)
+              // LISTA DE TAREAS EN TIEMPO REAL (Filtrada inteligentemente para días venideros)
               StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance.collection('servicios').snapshots(),
                 builder: (context, snapshot) {
@@ -587,53 +619,105 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     return Center(child: CircularProgressIndicator(color: primary));
                   }
 
+                  final isDark = AgroTheme.isDark(context);
                   final docs = snapshot.data?.docs ?? [];
                   final todosServicios = docs.map((d) => ServicioModel.fromMap(d.id, d.data() as Map<String, dynamic>)).toList();
 
-                  // Filtrar servicios activos (excluyendo completados y cancelados para "Próximas")
-                  final serviciosPendientes = todosServicios.where((s) {
+                  final ahora = DateTime.now();
+                  final inicioHoy = DateTime(ahora.year, ahora.month, ahora.day);
+
+                  // Filtrar servicios activos (excluyendo completados y cancelados)
+                  final serviciosActivos = todosServicios.where((s) {
                     return s.estado != 'COMPLETADO' && s.estado != 'CANCELADO';
                   }).toList();
 
-                  // Ordenar: primero EN_PROCESO, luego por fecha ascendente
-                  serviciosPendientes.sort((a, b) {
-                    if (a.estado == 'EN_PROCESO' && b.estado != 'EN_PROCESO') return -1;
-                    if (b.estado == 'EN_PROCESO' && a.estado != 'EN_PROCESO') return 1;
-                    return a.fecha.compareTo(b.fecha);
-                  });
+                  // 1. En vuelo ahora
+                  final enVuelo = serviciosActivos.where((s) => s.estado == 'EN_PROCESO').toList();
 
-                  if (serviciosPendientes.isEmpty) {
-                    return Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(20),
-                      decoration: BoxDecoration(
-                        color: cardBg,
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: border.withValues(alpha: 0.5)),
-                        boxShadow: AgroTheme.getShadow(context),
-                      ),
-                      child: Column(
-                        children: [
-                          Icon(Icons.check_circle_outline, color: primary, size: 36),
-                          const SizedBox(height: 8),
-                          Text(
-                            '¡Al día con las aplicaciones!',
-                            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: text),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'No hay vuelos pendientes en este momento.',
-                            style: TextStyle(fontSize: 12, color: subtext),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
+                  // 2. Días venideros: hoy en adelante
+                  final venideros = serviciosActivos.where((s) {
+                    if (s.estado == 'EN_PROCESO') return false;
+                    final fSinHora = DateTime(s.fecha.year, s.fecha.month, s.fecha.day);
+                    return !fSinHora.isBefore(inicioHoy);
+                  }).toList();
+                  venideros.sort((a, b) => a.fecha.compareTo(b.fecha));
 
-                  final proximas = serviciosPendientes.take(4).toList();
+                  // 3. Atrasados: fechas anteriores a hoy sin completar
+                  final atrasados = serviciosActivos.where((s) {
+                    if (s.estado == 'EN_PROCESO') return false;
+                    final fSinHora = DateTime(s.fecha.year, s.fecha.month, s.fecha.day);
+                    return fSinHora.isBefore(inicioHoy);
+                  }).toList();
+                  atrasados.sort((a, b) => b.fecha.compareTo(a.fecha));
+
+                  // Las próximas tareas son las que están en curso y las venideras reales
+                  final proximas = [...enVuelo, ...venideros].take(6).toList();
 
                   return Column(
-                    children: proximas.map((s) => _buildProximaTareaCard(context, s)).toList(),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Banner si hay tareas atrasadas de días anteriores para no bloquear las venideras
+                      if (atrasados.isNotEmpty)
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withValues(alpha: isDark ? 0.15 : 0.08),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.amber.withValues(alpha: 0.5)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.warning_amber_rounded, size: 20, color: Colors.amber),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Text(
+                                  'Tienes ${atrasados.length} tarea${atrasados.length == 1 ? '' : 's'} pendiente${atrasados.length == 1 ? '' : 's'} de días anteriores.',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: text),
+                                ),
+                              ),
+                              TextButton(
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  minimumSize: Size.zero,
+                                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                ),
+                                onPressed: widget.onVerTodasTareas,
+                                child: const Text('Revisar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.orange)),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                      if (proximas.isEmpty)
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: cardBg,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: border.withValues(alpha: 0.5)),
+                            boxShadow: AgroTheme.getShadow(context),
+                          ),
+                          child: Column(
+                            children: [
+                              Icon(Icons.check_circle_outline, color: primary, size: 36),
+                              const SizedBox(height: 8),
+                              Text(
+                                '¡Al día con las aplicaciones!',
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: text),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'No hay vuelos programados para hoy ni los próximos días.',
+                                style: TextStyle(fontSize: 12, color: subtext),
+                              ),
+                            ],
+                          ),
+                        )
+                      else
+                        ...proximas.map((s) => _buildProximaTareaCard(context, s)),
+                    ],
                   );
                 },
               ),
@@ -653,7 +737,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
     Color badgeColor = primary;
     Color badgeBg = primary.withValues(alpha: 0.15);
-    String estadoText = 'PENDIENTE';
+    String estadoText = 'PROGRAMADO';
 
     if (s.estado == 'EN_PROCESO') {
       badgeColor = const Color(0xFFD97706);
@@ -668,6 +752,35 @@ class _DashboardScreenState extends State<DashboardScreen> {
     final hora = DateFormat('hh:mm a').format(s.fecha);
     final fechaDia = DateFormat("d 'de' MMMM", 'es').format(s.fecha);
 
+    final ahora = DateTime.now();
+    final hoySinHora = DateTime(ahora.year, ahora.month, ahora.day);
+    final fechaTareaSinHora = DateTime(s.fecha.year, s.fecha.month, s.fecha.day);
+    final diffDias = fechaTareaSinHora.difference(hoySinHora).inDays;
+
+    String fechaTagTexto;
+    Color fechaTagColor;
+
+    if (s.estado == 'EN_PROCESO') {
+      fechaTagTexto = '🛸 EN VUELO';
+      fechaTagColor = const Color(0xFFD97706);
+    } else if (diffDias == 0) {
+      fechaTagTexto = '🟢 HOY';
+      fechaTagColor = const Color(0xFF2E7D32);
+    } else if (diffDias == 1) {
+      fechaTagTexto = '🔵 MAÑANA';
+      fechaTagColor = const Color(0xFF0288D1);
+    } else if (diffDias > 1 && diffDias <= 7) {
+      final diaSem = DateFormat('EEE d', 'es').format(s.fecha);
+      fechaTagTexto = '🗓️ En $diffDias días ($diaSem)';
+      fechaTagColor = primary;
+    } else if (diffDias > 7) {
+      fechaTagTexto = '🗓️ $fechaDia';
+      fechaTagColor = primary;
+    } else {
+      fechaTagTexto = '⚠️ Atrasada ($fechaDia)';
+      fechaTagColor = Colors.redAccent;
+    }
+
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
@@ -678,84 +791,113 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(16),
-        child: IntrinsicHeight(
-          child: Row(
-            children: [
-              // Barra vertical indicadora
-              Container(
-                width: 4,
-                color: s.estado == 'EN_PROCESO' ? const Color(0xFFD97706) : primary,
-              ),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.all(14.0),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 42,
-                        height: 42,
-                        decoration: BoxDecoration(
-                          color: primary.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Center(
-                          child: Text(
-                            CropHelper.getEmoji(s.cultivo),
-                            style: const TextStyle(fontSize: 22),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '${s.cultivo} • ${s.fincaUbicacion}',
-                              style: TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                                color: text,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              'Cliente: ${s.clienteNombre} (${s.hectareas} Ha)',
-                              style: TextStyle(fontSize: 12, color: subtext),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '📅 $fechaDia - $hora',
-                              style: TextStyle(fontSize: 11, color: primary, fontWeight: FontWeight.w600),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: badgeBg,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          estadoText,
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.bold,
-                            color: badgeColor,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ),
-                    ],
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: widget.onVerTodasTareas,
+            child: IntrinsicHeight(
+              child: Row(
+                children: [
+                  // Barra vertical indicadora
+                  Container(
+                    width: 4,
+                    color: s.estado == 'EN_PROCESO' ? const Color(0xFFD97706) : primary,
                   ),
-                ),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(14.0),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            decoration: BoxDecoration(
+                              color: primary.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Center(
+                              child: Text(
+                                CropHelper.getEmoji(s.cultivo),
+                                style: const TextStyle(fontSize: 22),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        '${s.cultivo} • ${s.fincaUbicacion}',
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.bold,
+                                          color: text,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: fechaTagColor.withValues(alpha: 0.12),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: fechaTagColor.withValues(alpha: 0.4)),
+                                      ),
+                                      child: Text(
+                                        fechaTagTexto,
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: fechaTagColor,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  'Cliente: ${s.clienteNombre} (${s.hectareas} Ha)',
+                                  style: TextStyle(fontSize: 12, color: subtext),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '⏰ $hora - $fechaDia',
+                                  style: TextStyle(fontSize: 11, color: primary, fontWeight: FontWeight.w600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: badgeBg,
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Text(
+                              estadoText,
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: badgeColor,
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),

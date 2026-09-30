@@ -11,6 +11,7 @@ import '../utils/time_picker_helper.dart';
 import '../services/notification_service.dart';
 import '../utils/operaciones_helper.dart';
 import '../services/pdf_service.dart';
+import '../widgets/registro_bitacora_dialog.dart';
 
 class ServiciosScreen extends StatefulWidget {
   final DateTime? fechaInicial;
@@ -581,7 +582,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: () {
+              Navigator.pop(ctx);
+              if (mounted) {
+                _ofrecerRegistroBitacora(servicio);
+              }
+            },
             child: const Text('No por ahora'),
           ),
           ElevatedButton(
@@ -608,8 +614,44 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
               messenger.showSnackBar(
                 const SnackBar(content: Text('¡Ingreso registrado en Contabilidad con éxito!')),
               );
+
+              if (mounted) {
+                _ofrecerRegistroBitacora(servicio);
+              }
             },
             child: const Text('Registrar Ingreso', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _ofrecerRegistroBitacora(ServicioModel servicio) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.history_edu_rounded, color: Colors.teal),
+            SizedBox(width: 8),
+            Text('Bitácora de Vuelo'),
+          ],
+        ),
+        content: Text(
+          '¿Deseas registrar la Bitácora de vuelo de ${servicio.cultivo} para ${servicio.clienteNombre} ahora?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Omitir / No por ahora', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
+            onPressed: () {
+              Navigator.pop(ctx);
+              RegistroBitacoraDialog.mostrar(context, servicio);
+            },
+            child: const Text('Registrar Bitácora', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -626,11 +668,12 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            onPressed: () {
+            onPressed: () async {
               if (servicio.id != null) {
-                FirebaseFirestore.instance.collection('servicios').doc(servicio.id).delete();
+                await FirebaseFirestore.instance.collection('servicios').doc(servicio.id).delete();
+                await FirebaseFirestore.instance.collection('bitacoras_vuelo').doc(servicio.id).delete();
               }
-              Navigator.pop(ctx);
+              if (ctx.mounted) Navigator.pop(ctx);
             },
             child: const Text('Eliminar', style: TextStyle(color: Colors.white)),
           ),

@@ -1,3 +1,5 @@
+import 'bitacora_vuelo_model.dart';
+
 class ServicioModel {
   String? id;
   String clienteId;
@@ -20,6 +22,7 @@ class ServicioModel {
   String dron;
   double totalAbonado;
   double? litrosAplicados;
+  BitacoraVueloModel? bitacora;
 
   ServicioModel({
     this.id,
@@ -43,6 +46,7 @@ class ServicioModel {
     this.dron = '',
     double? totalAbonado,
     this.litrosAplicados,
+    this.bitacora,
   }) : totalAbonado = totalAbonado ?? (pagado ? precioTotal : 0.0);
 
   double get saldoPendiente {
@@ -84,6 +88,7 @@ class ServicioModel {
       'dron': dron,
       'totalAbonado': totalAbonado,
       if (litrosAplicados != null) 'litrosAplicados': litrosAplicados,
+      if (bitacora != null) 'bitacora': bitacora!.toMap(),
     };
   }
 
@@ -117,6 +122,9 @@ class ServicioModel {
       totalAbonado: totalAbonadoVal,
       litrosAplicados: map['litrosAplicados'] != null
           ? (map['litrosAplicados'] as num).toDouble()
+          : null,
+      bitacora: map['bitacora'] != null
+          ? BitacoraVueloModel.fromMap(null, Map<String, dynamic>.from(map['bitacora']))
           : null,
     );
   }

@@ -7,6 +7,7 @@ import '../services/notification_service.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
 import '../models/app_version_model.dart';
+import 'bitacoras_historial_screen.dart';
 
 class HerramientasScreen extends StatefulWidget {
   const HerramientasScreen({super.key});
@@ -40,6 +41,16 @@ class _HerramientasScreenState extends State<HerramientasScreen> with SingleTick
         backgroundColor: themeColor,
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            tooltip: 'Historial de Bitácoras',
+            icon: const Icon(Icons.history_edu_rounded),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BitacorasHistorialScreen()),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Probar Notificación Real',
             icon: const Icon(Icons.notifications_active_outlined),
