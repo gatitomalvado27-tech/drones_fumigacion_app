@@ -11,7 +11,7 @@ import '../utils/time_picker_helper.dart';
 import '../services/notification_service.dart';
 import '../utils/operaciones_helper.dart';
 import '../services/pdf_service.dart';
-import '../widgets/registro_bitacora_dialog.dart';
+import '../widgets/registro_cobro_servicio_dialog.dart';
 
 class ServiciosScreen extends StatefulWidget {
   final DateTime? fechaInicial;
@@ -544,7 +544,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     });
 
     if (nuevoEstado == 'COMPLETADO') {
-      _ofrecerRegistrarEnContabilidad(servicio);
+      if (mounted) {
+        RegistroCobroServicioDialog.mostrar(context, servicio, abrirBitacoraDespues: true);
+      }
     } else if (nuevoEstado == 'CANCELADO') {
       // Revertir contabilidad si estaba pagado o registrado
       await FirebaseFirestore.instance.collection('servicios').doc(servicio.id).update({
@@ -570,92 +572,6 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         );
       }
     }
-  }
-
-  void _ofrecerRegistrarEnContabilidad(ServicioModel servicio) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('¿Registrar ingreso en contabilidad?'),
-        content: Text(
-          'El servicio de ${servicio.clienteNombre} por ${_currencyFormat.format(servicio.precioTotal)} se ha completado. ¿Deseas agregarlo a los ingresos de la empresa?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              if (mounted) {
-                _ofrecerRegistroBitacora(servicio);
-              }
-            },
-            child: const Text('No por ahora'),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2E7D32)),
-            onPressed: () async {
-              final messenger = ScaffoldMessenger.of(context);
-              final navigator = Navigator.of(ctx);
-              await FirebaseFirestore.instance.collection('transacciones').add({
-                'tipo': 'INGRESO',
-                'categoria': 'SERVICIO',
-                'monto': servicio.precioTotal,
-                'descripcion': 'Fumigación ${servicio.cultivo} (${servicio.hectareas} Ha) - ${servicio.clienteNombre}',
-                'fecha': DateTime.now().toIso8601String(),
-                'servicioId': servicio.id,
-              });
-
-              if (servicio.id != null) {
-                await FirebaseFirestore.instance.collection('servicios').doc(servicio.id).update({
-                  'pagado': true,
-                });
-              }
-
-              navigator.pop();
-              messenger.showSnackBar(
-                const SnackBar(content: Text('¡Ingreso registrado en Contabilidad con éxito!')),
-              );
-
-              if (mounted) {
-                _ofrecerRegistroBitacora(servicio);
-              }
-            },
-            child: const Text('Registrar Ingreso', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _ofrecerRegistroBitacora(ServicioModel servicio) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Row(
-          children: [
-            Icon(Icons.history_edu_rounded, color: Colors.teal),
-            SizedBox(width: 8),
-            Text('Bitácora de Vuelo'),
-          ],
-        ),
-        content: Text(
-          '¿Deseas registrar la Bitácora de vuelo de ${servicio.cultivo} para ${servicio.clienteNombre} ahora?',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Omitir / No por ahora', style: TextStyle(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal),
-            onPressed: () {
-              Navigator.pop(ctx);
-              RegistroBitacoraDialog.mostrar(context, servicio);
-            },
-            child: const Text('Registrar Bitácora', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
   }
 
   void _confirmarEliminarServicio(ServicioModel servicio) {

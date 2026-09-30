@@ -5,6 +5,8 @@ import '../models/servicio_model.dart';
 import '../models/bitacora_vuelo_model.dart';
 import '../theme/agro_theme.dart';
 import '../utils/crop_helper.dart';
+import 'registro_dano_equipo_dialog.dart';
+import 'registro_cobro_servicio_dialog.dart';
 
 class RegistroBitacoraDialog extends StatefulWidget {
   final ServicioModel servicio;
@@ -159,6 +161,25 @@ class _RegistroBitacoraDialogState extends State<RegistroBitacoraDialog> {
         updateData['hectareas'] = haReales;
         final nuevoTotal = haReales * widget.servicio.precioPorHectarea;
         updateData['precioTotal'] = nuevoTotal;
+        widget.servicio.hectareas = haReales;
+        widget.servicio.precioTotal = nuevoTotal;
+
+        // Si ya existían transacciones de ingreso de este servicio, sincronizar el monto
+        if (widget.servicio.id != null) {
+          final snapTrans = await FirebaseFirestore.instance
+              .collection('transacciones')
+              .where('servicioId', isEqualTo: widget.servicio.id)
+              .get();
+          for (var doc in snapTrans.docs) {
+            final data = doc.data();
+            if (data['tipo'] == 'INGRESO') {
+              await doc.reference.update({
+                'monto': nuevoTotal,
+                'descripcion': 'Fumigación ${widget.servicio.cultivo} ($haReales Ha) - ${widget.servicio.clienteNombre}',
+              });
+            }
+          }
+        }
       }
 
       // Guardar en el servicio
@@ -199,6 +220,11 @@ class _RegistroBitacoraDialogState extends State<RegistroBitacoraDialog> {
           ),
         );
         widget.onGuardado?.call();
+
+        // Si el servicio aún no tiene registrado su cobro en caja o no está pagado, ofrecer la gestión contable
+        if (!widget.servicio.pagado && context.mounted) {
+          RegistroCobroServicioDialog.mostrar(context, widget.servicio, abrirBitacoraDespues: false);
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -547,6 +573,43 @@ class _RegistroBitacoraDialogState extends State<RegistroBitacoraDialog> {
                         hintStyle: TextStyle(fontSize: 12, color: subtext),
                         isDense: true,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    // ACCESO A REPORTE DE DAÑOS EN EQUIPOS
+                    InkWell(
+                      borderRadius: BorderRadius.circular(10),
+                      onTap: () => RegistroDanoEquipoDialog.mostrar(context, servicioAsociado: widget.servicio),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: isDark ? 0.15 : 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.car_crash_outlined, size: 18, color: Colors.redAccent),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '¿Hubo daño en Dron, Camioneta o Baterías?',
+                                    style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: isDark ? Colors.red.shade200 : Colors.red.shade800),
+                                  ),
+                                  Text(
+                                    'Toca aquí para registrar fotos, piezas y reporte en la Bitácora de Daños',
+                                    style: TextStyle(fontSize: 10, color: subtext),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Icon(Icons.arrow_forward_ios, size: 12, color: isDark ? Colors.red.shade200 : Colors.red.shade800),
+                          ],
+                        ),
                       ),
                     ),
 

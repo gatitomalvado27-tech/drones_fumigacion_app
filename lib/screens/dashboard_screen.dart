@@ -14,6 +14,8 @@ import '../utils/operaciones_helper.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
 import 'bitacoras_historial_screen.dart';
+import 'bitacora_danos_screen.dart';
+import 'repuestos_vida_util_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback onVerTodasTareas;
@@ -588,6 +590,60 @@ class _DashboardScreenState extends State<DashboardScreen> {
                               Icon(Icons.history_edu_rounded, size: 13, color: Colors.teal),
                               SizedBox(width: 4),
                               Text('Bitácoras', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal)),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Acceso directo a Daños de Equipos
+                      InkWell(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const BitacoraDanosScreen()),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.redAccent.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.car_crash_rounded, size: 13, color: Colors.redAccent),
+                              SizedBox(width: 4),
+                              Text('Daños', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.redAccent)),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Acceso directo a Vida Útil de Repuestos
+                      InkWell(
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const RepuestosVidaUtilScreen()),
+                          );
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.blue.withValues(alpha: 0.4)),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.build_circle_rounded, size: 13, color: Colors.blue),
+                              SizedBox(width: 4),
+                              Text('Repuestos', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
                             ],
                           ),
                         ),

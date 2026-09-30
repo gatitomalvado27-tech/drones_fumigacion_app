@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -5,6 +6,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import '../models/transaccion_model.dart';
 import '../models/servicio_model.dart';
+import '../models/bitacora_dano_equipo_model.dart';
 
 class PdfService {
   static final NumberFormat _currencyFormat = NumberFormat.currency(
@@ -1007,6 +1009,387 @@ class PdfService {
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => bytes,
       name: 'Orden_Icaro_Proagro_${s.clienteNombre.replaceAll(" ", "_")}.pdf',
+    );
+  }
+
+  /// Genera en bytes la Ficha Técnica de Daños e Inspección de Equipos
+  static Future<Uint8List> generarFichaTecnicaDanoPdf(
+    BitacoraDanoEquipoModel dano, {
+    ServicioModel? servicio,
+  }) async {
+    final pdf = pw.Document();
+
+    final fontBold = await PdfGoogleFonts.interBold();
+    final fontRegular = await PdfGoogleFonts.interRegular();
+    final fontMedium = await PdfGoogleFonts.interMedium();
+
+    const verdePrimario = PdfColor.fromInt(0xFF059669);
+    const verdeOscuro = PdfColor.fromInt(0xFF02371E);
+    const grisFondo = PdfColor.fromInt(0xFFF1F5F2);
+    const grisBorde = PdfColor.fromInt(0xFFCBD5E1);
+    const textoOscuro = PdfColor.fromInt(0xFF0F172A);
+    const textoSecundario = PdfColor.fromInt(0xFF475569);
+
+    final colorGravedad = dano.gravedad == 'CRITICA'
+        ? const PdfColor.fromInt(0xFFDC2626)
+        : dano.gravedad == 'MODERADA'
+            ? const PdfColor.fromInt(0xFFD97706)
+            : const PdfColor.fromInt(0xFF059669);
+
+    final colorEstado = dano.estado == 'REPARADO'
+        ? const PdfColor.fromInt(0xFF059669)
+        : dano.estado == 'EN_REPARACION'
+            ? const PdfColor.fromInt(0xFF2563EB)
+            : const PdfColor.fromInt(0xFFD97706);
+
+    final fechaStr = DateFormat("dd/MM/yyyy - hh:mm a").format(dano.fecha);
+    final reporteId = dano.id != null && dano.id!.length >= 6
+        ? dano.id!.substring(0, 6).toUpperCase()
+        : '001';
+
+    // Decodificar imágenes válidas
+    final List<Uint8List> fotosBytes = [];
+    for (var f in dano.fotosBase64) {
+      try {
+        final decoded = base64Decode(f);
+        if (decoded.isNotEmpty) {
+          fotosBytes.add(decoded);
+        }
+      } catch (_) {}
+    }
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        build: (context) => [
+          // ENCABEZADO PRINCIPAL
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(
+                    'ICARO PROAGRO',
+                    style: pw.TextStyle(
+                      font: fontBold,
+                      fontSize: 22,
+                      color: verdeOscuro,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                  pw.Text(
+                    'SERVICIOS AGRÍCOLAS CON DRONES DE ALTA PRECISIÓN',
+                    style: pw.TextStyle(
+                      font: fontMedium,
+                      fontSize: 8.5,
+                      color: verdePrimario,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  pw.SizedBox(height: 4),
+                  pw.Text(
+                    'Ficha Técnica Oficial de Daño e Inspección de Equipos',
+                    style: pw.TextStyle(
+                      fontSize: 9.5,
+                      color: textoSecundario,
+                      font: fontRegular,
+                    ),
+                  ),
+                ],
+              ),
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: pw.BoxDecoration(
+                  color: grisFondo,
+                  borderRadius: pw.BorderRadius.circular(8),
+                  border: pw.Border.all(color: grisBorde),
+                ),
+                child: pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.end,
+                  children: [
+                    pw.Text(
+                      'FOLIO #$reporteId',
+                      style: pw.TextStyle(font: fontBold, fontSize: 13, color: verdeOscuro),
+                    ),
+                    pw.SizedBox(height: 2),
+                    pw.Text('Fecha: $fechaStr', style: pw.TextStyle(fontSize: 8, color: textoSecundario)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          pw.SizedBox(height: 14),
+
+          // BADGES DE ESTADO Y GRAVEDAD
+          pw.Row(
+            children: [
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: pw.BoxDecoration(
+                  color: colorGravedad,
+                  borderRadius: pw.BorderRadius.circular(6),
+                ),
+                child: pw.Text(
+                  'GRAVEDAD: ${BitacoraDanoEquipoModel.nombreGravedad(dano.gravedad).toUpperCase()}',
+                  style: pw.TextStyle(font: fontBold, fontSize: 8.5, color: PdfColors.white),
+                ),
+              ),
+              pw.SizedBox(width: 8),
+              pw.Container(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: pw.BoxDecoration(
+                  color: colorEstado,
+                  borderRadius: pw.BorderRadius.circular(6),
+                ),
+                child: pw.Text(
+                  'ESTADO: ${BitacoraDanoEquipoModel.nombreEstado(dano.estado).toUpperCase()}',
+                  style: pw.TextStyle(font: fontBold, fontSize: 8.5, color: PdfColors.white),
+                ),
+              ),
+              pw.Spacer(),
+              pw.Text(
+                'Categoría: ${BitacoraDanoEquipoModel.nombreCategoria(dano.categoriaEquipo)}',
+                style: pw.TextStyle(font: fontBold, fontSize: 9.5, color: textoOscuro),
+              ),
+            ],
+          ),
+
+          pw.SizedBox(height: 14),
+
+          // SECCIÓN 1: IDENTIFICACIÓN DEL EQUIPO Y RESPONSABLES
+          pw.Container(
+            padding: const pw.EdgeInsets.all(12),
+            decoration: pw.BoxDecoration(
+              color: grisFondo,
+              borderRadius: pw.BorderRadius.circular(8),
+              border: pw.Border.all(color: grisBorde),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('1. DATOS DEL EQUIPO Y OPERACIÓN', style: pw.TextStyle(font: fontBold, fontSize: 9.5, color: verdeOscuro)),
+                pw.SizedBox(height: 8),
+                pw.Row(
+                  children: [
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('Equipo / Unidad:', style: pw.TextStyle(fontSize: 8, color: textoSecundario)),
+                          pw.Text(dano.nombreEquipo, style: pw.TextStyle(font: fontBold, fontSize: 10, color: textoOscuro)),
+                          pw.SizedBox(height: 6),
+                          pw.Text('Tipo de Equipo:', style: pw.TextStyle(fontSize: 8, color: textoSecundario)),
+                          pw.Text(BitacoraDanoEquipoModel.nombreCategoria(dano.categoriaEquipo), style: pw.TextStyle(font: fontMedium, fontSize: 9)),
+                        ],
+                      ),
+                    ),
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('Piloto / Técnico que Reporta:', style: pw.TextStyle(fontSize: 8, color: textoSecundario)),
+                          pw.Text(dano.pilotoReporta, style: pw.TextStyle(font: fontBold, fontSize: 10, color: textoOscuro)),
+                          pw.SizedBox(height: 6),
+                          pw.Text('Operación / Servicio Vinculado:', style: pw.TextStyle(fontSize: 8, color: textoSecundario)),
+                          pw.Text(
+                            servicio != null
+                                ? '${servicio.clienteNombre} (${servicio.cultivo} - ${servicio.hectareas} Ha)'
+                                : 'No asociado a vuelo específico',
+                            style: pw.TextStyle(font: fontMedium, fontSize: 9),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          pw.SizedBox(height: 12),
+
+          // SECCIÓN 2: DETALLE TÉCNICO DE LA AVERÍA
+          pw.Container(
+            padding: const pw.EdgeInsets.all(12),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.white,
+              borderRadius: pw.BorderRadius.circular(8),
+              border: pw.Border.all(color: grisBorde),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('2. DESCRIPCIÓN DEL INCIDENTE Y DAÑO OBSERVADO', style: pw.TextStyle(font: fontBold, fontSize: 9.5, color: verdeOscuro)),
+                pw.SizedBox(height: 6),
+                pw.Row(
+                  children: [
+                    pw.Text('Tipo de Avería: ', style: pw.TextStyle(font: fontBold, fontSize: 9)),
+                    pw.Text(dano.tipoDano, style: pw.TextStyle(fontSize: 9, color: textoOscuro)),
+                  ],
+                ),
+                pw.SizedBox(height: 6),
+                pw.Text(
+                  dano.descripcion.isNotEmpty ? dano.descripcion : 'Sin descripción adicional.',
+                  style: pw.TextStyle(fontSize: 9, color: textoOscuro, font: fontRegular, lineSpacing: 2),
+                ),
+                if (dano.videoUrl != null && dano.videoUrl!.isNotEmpty) ...[
+                  pw.SizedBox(height: 6),
+                  pw.Text('Enlace de Video Evidencia: ${dano.videoUrl}', style: pw.TextStyle(fontSize: 8, color: PdfColors.blue700)),
+                ],
+              ],
+            ),
+          ),
+
+          pw.SizedBox(height: 12),
+
+          // SECCIÓN 3: REPUESTOS, COSTOS E IMPACTO FINANCIERO
+          pw.Container(
+            padding: const pw.EdgeInsets.all(12),
+            decoration: pw.BoxDecoration(
+              color: grisFondo,
+              borderRadius: pw.BorderRadius.circular(8),
+              border: pw.Border.all(color: grisBorde),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text('3. INTERVENCIÓN TÉCNICA, REPUESTOS Y LIQUIDACIÓN', style: pw.TextStyle(font: fontBold, fontSize: 9.5, color: verdeOscuro)),
+                pw.SizedBox(height: 8),
+                pw.Row(
+                  children: [
+                    pw.Expanded(
+                      flex: 2,
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('Piezas / Repuestos Reemplazados:', style: pw.TextStyle(fontSize: 8, color: textoSecundario)),
+                          pw.Text(
+                            dano.piezasCambiadas.isNotEmpty ? dano.piezasCambiadas : 'Ninguno registrado aún',
+                            style: pw.TextStyle(font: fontMedium, fontSize: 9.5, color: textoOscuro),
+                          ),
+                        ],
+                      ),
+                    ),
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('Costo de Reparación:', style: pw.TextStyle(fontSize: 8, color: textoSecundario)),
+                          pw.Text(
+                            _currencyFormat.format(dano.costoReparacion),
+                            style: pw.TextStyle(font: fontBold, fontSize: 11, color: dano.costoReparacion > 0 ? const PdfColor.fromInt(0xFFDC2626) : verdePrimario),
+                          ),
+                        ],
+                      ),
+                    ),
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.start,
+                        children: [
+                          pw.Text('Estado Contable:', style: pw.TextStyle(fontSize: 8, color: textoSecundario)),
+                          pw.Text(
+                            dano.gastoContableRegistrado ? 'Asentado en Caja' : 'Pendiente en Caja',
+                            style: pw.TextStyle(
+                              font: fontMedium,
+                              fontSize: 9,
+                              color: dano.gastoContableRegistrado ? verdePrimario : const PdfColor.fromInt(0xFFD97706),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // SECCIÓN 4: EVIDENCIA FOTOGRÁFICA
+          if (fotosBytes.isNotEmpty) ...[
+            pw.SizedBox(height: 14),
+            pw.Text('4. REGISTRO FOTOGRÁFICO DE EVIDENCIA (${fotosBytes.length} Foto(s))', style: pw.TextStyle(font: fontBold, fontSize: 9.5, color: verdeOscuro)),
+            pw.SizedBox(height: 8),
+            pw.Wrap(
+              spacing: 10,
+              runSpacing: 10,
+              children: fotosBytes.take(4).map((imgBytes) {
+                return pw.Container(
+                  width: 230,
+                  height: 120,
+                  decoration: pw.BoxDecoration(
+                    borderRadius: pw.BorderRadius.circular(6),
+                    border: pw.Border.all(color: grisBorde, width: 1),
+                  ),
+                  child: pw.ClipRRect(
+                    horizontalRadius: 6,
+                    verticalRadius: 6,
+                    child: pw.Image(
+                      pw.MemoryImage(imgBytes),
+                      fit: pw.BoxFit.cover,
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+
+          pw.SizedBox(height: 24),
+
+          // SECCIÓN 5: FIRMAS DE RESPONSABILIDAD
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 170, height: 1, color: grisBorde),
+                  pw.SizedBox(height: 6),
+                  pw.Text('Firma del Piloto / Operador', style: pw.TextStyle(fontSize: 8, font: fontMedium, color: textoSecundario)),
+                  pw.Text(dano.pilotoReporta, style: pw.TextStyle(fontSize: 8.5, font: fontBold, color: textoOscuro)),
+                ],
+              ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.Container(width: 170, height: 1, color: grisBorde),
+                  pw.SizedBox(height: 6),
+                  pw.Text('Firma Mantenimiento / Aprobación', style: pw.TextStyle(fontSize: 8, font: fontMedium, color: textoSecundario)),
+                  pw.Text('Ícaro Proagro Colombia', style: pw.TextStyle(fontSize: 8.5, font: fontBold, color: textoOscuro)),
+                ],
+              ),
+            ],
+          ),
+        ],
+        footer: (context) => pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(
+              'Ícaro Proagro • Registro Oficial de Mantenimiento y Garantías Técnicas',
+              style: pw.TextStyle(fontSize: 7.5, color: textoSecundario),
+            ),
+            pw.Text('Página ${context.pageNumber} de ${context.pagesCount}', style: pw.TextStyle(fontSize: 7.5, color: textoSecundario)),
+          ],
+        ),
+      ),
+    );
+
+    return pdf.save();
+  }
+
+  /// Abre la vista interactiva para previsualizar, imprimir o exportar la Ficha Técnica de Daño
+  static Future<void> generarYCompartirFichaTecnicaDano(
+    BitacoraDanoEquipoModel dano, {
+    ServicioModel? servicio,
+  }) async {
+    final bytes = await generarFichaTecnicaDanoPdf(dano, servicio: servicio);
+    final nombreLimpio = dano.nombreEquipo.replaceAll(' ', '_');
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => bytes,
+      name: 'Ficha_Tecnica_Dano_${dano.categoriaEquipo}_$nombreLimpio.pdf',
     );
   }
 }

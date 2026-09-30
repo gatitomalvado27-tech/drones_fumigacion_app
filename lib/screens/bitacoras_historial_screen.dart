@@ -7,6 +7,8 @@ import '../models/servicio_model.dart';
 import '../theme/agro_theme.dart';
 import '../utils/crop_helper.dart';
 import '../widgets/registro_bitacora_dialog.dart';
+import 'bitacora_danos_screen.dart';
+import 'repuestos_vida_util_screen.dart';
 
 class BitacorasHistorialScreen extends StatefulWidget {
   const BitacorasHistorialScreen({super.key});
@@ -15,9 +17,22 @@ class BitacorasHistorialScreen extends StatefulWidget {
   State<BitacorasHistorialScreen> createState() => _BitacorasHistorialScreenState();
 }
 
-class _BitacorasHistorialScreenState extends State<BitacorasHistorialScreen> {
+class _BitacorasHistorialScreenState extends State<BitacorasHistorialScreen> with SingleTickerProviderStateMixin {
+  late TabController _tabController;
   String _busqueda = '';
   String _filtroEstado = 'TODOS'; // 'TODOS', 'EXITOSOS', 'NOVEDADES'
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 3, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
+  }
 
   Future<void> _compartirPorWhatsApp(BitacoraVueloModel b) async {
     final fecha = DateFormat("dd/MM/yyyy - hh:mm a").format(b.fechaVuelo);
@@ -82,13 +97,41 @@ class _BitacorasHistorialScreenState extends State<BitacorasHistorialScreen> {
         foregroundColor: text,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(1),
-          child: Container(color: border.withValues(alpha: 0.5), height: 1),
+        bottom: TabBar(
+          controller: _tabController,
+          labelColor: primary,
+          unselectedLabelColor: subtext,
+          indicatorColor: primary,
+          indicatorWeight: 3,
+          labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+          tabs: const [
+            Tab(icon: Icon(Icons.history_edu_rounded, size: 20), text: 'Vuelos y Campo'),
+            Tab(icon: Icon(Icons.car_crash_rounded, size: 20), text: 'Daños en Equipos'),
+            Tab(icon: Icon(Icons.build_circle_rounded, size: 20), text: 'Vida Útil Repuestos'),
+          ],
         ),
       ),
-      body: SafeArea(
-        child: StreamBuilder<QuerySnapshot>(
+      body: TabBarView(
+        controller: _tabController,
+        children: [
+          _buildBitacorasVueloTab(cardBg, text, subtext, primary, border, isDark),
+          const BitacoraDanosScreen(comoWidget: true),
+          const RepuestosVidaUtilScreen(comoWidget: true),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBitacorasVueloTab(
+    Color cardBg,
+    Color text,
+    Color subtext,
+    Color primary,
+    Color border,
+    bool isDark,
+  ) {
+    return SafeArea(
+      child: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance.collection('servicios').snapshots(),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) {
@@ -283,8 +326,7 @@ class _BitacorasHistorialScreenState extends State<BitacorasHistorialScreen> {
             );
           },
         ),
-      ),
-    );
+      );
   }
 
   Widget _buildMetricaMini(String label, String valor, IconData icon, Color color, Color text, Color subtext) {

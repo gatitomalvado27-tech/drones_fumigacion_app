@@ -13,6 +13,7 @@ import '../services/pdf_service.dart';
 import '../services/notification_service.dart';
 import '../utils/crop_helper.dart';
 import 'historial_balances_screen.dart';
+import '../widgets/registro_cobro_servicio_dialog.dart';
 
 class ContabilidadScreen extends StatefulWidget {
   const ContabilidadScreen({super.key});
@@ -918,6 +919,8 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
               return Center(child: CircularProgressIndicator(color: primary));
             }
 
+            final isDark = Theme.of(context).brightness == Brightness.dark;
+
             // Datos de Transacciones filtradas por período
             final docsTrans = snapTransacciones.data?.docs ?? [];
             final todasTrans = docsTrans.map((doc) {
@@ -958,6 +961,16 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
             final docsServ = snapServicios.data?.docs ?? [];
             final todosServ = docsServ.map((doc) {
               return ServicioModel.fromMap(doc.id, doc.data() as Map<String, dynamic>);
+            }).toList();
+
+            final Set<String> servicioIdsConTransaccion = todasTrans
+                .where((t) => t.servicioId != null && t.servicioId!.isNotEmpty)
+                .map((t) => t.servicioId!)
+                .toSet();
+
+            final List<ServicioModel> vuelosCompletadosSinMovimiento = todosServ.where((s) {
+              if (s.id == null) return false;
+              return s.estado == 'COMPLETADO' && !servicioIdsConTransaccion.contains(s.id);
             }).toList();
 
             final serviciosEnPeriodo = todosServ.where((s) => _estaEnPeriodo(s.fecha)).toList();
@@ -1065,6 +1078,102 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                   ),
 
                   const SizedBox(height: 8),
+
+                  // ALERTA DE CONCILIACIÓN DE VUELOS COMPLETADOS SIN REGISTRO EN CAJA
+                  if (vuelosCompletadosSinMovimiento.isNotEmpty) ...[
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 14),
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withValues(alpha: isDark ? 0.16 : 0.1),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: Colors.amber.shade700, width: 1.5),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withValues(alpha: 0.25),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Icon(Icons.notifications_active_rounded, color: Colors.amber, size: 20),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${vuelosCompletadosSinMovimiento.length} Vuelo(s) Finalizado(s) sin Reflejar en Caja',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                        color: isDark ? Colors.amber.shade200 : Colors.amber.shade900,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Vuelos completados que aún no tienen movimiento registrado. Toca para registrar su cobro o crédito:',
+                                      style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 10),
+                          ...vuelosCompletadosSinMovimiento.map((v) {
+                            return Container(
+                              margin: const EdgeInsets.only(top: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: cardBg,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: borderColor.withValues(alpha: 0.5)),
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${v.clienteNombre} (${v.cultivo} - ${v.hectareas} Ha)',
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5, color: onSurface),
+                                        ),
+                                        Text(
+                                          'Valor: ${_currencyFormat.format(v.precioTotal)} • Fecha: ${DateFormat("dd/MM/yyyy").format(v.fecha)}',
+                                          style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFF2E7D32),
+                                      foregroundColor: Colors.white,
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    icon: const Icon(Icons.paid_outlined, size: 14),
+                                    label: const Text('Registrar Cobro', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                    onPressed: () {
+                                      RegistroCobroServicioDialog.mostrar(context, v, abrirBitacoraDespues: false);
+                                    },
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ],
 
                   // HERO CARD 1: PATRIMONIO REAL DE LA EMPRESA
                   Container(

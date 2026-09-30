@@ -8,6 +8,7 @@ import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
 import '../models/app_version_model.dart';
 import 'bitacoras_historial_screen.dart';
+import 'bitacora_danos_screen.dart';
 
 class HerramientasScreen extends StatefulWidget {
   const HerramientasScreen({super.key});
@@ -41,6 +42,16 @@ class _HerramientasScreenState extends State<HerramientasScreen> with SingleTick
         backgroundColor: themeColor,
         foregroundColor: Colors.white,
         actions: [
+          IconButton(
+            tooltip: 'Daños en Equipos',
+            icon: const Icon(Icons.car_crash_rounded),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const BitacoraDanosScreen()),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Historial de Bitácoras',
             icon: const Icon(Icons.history_edu_rounded),

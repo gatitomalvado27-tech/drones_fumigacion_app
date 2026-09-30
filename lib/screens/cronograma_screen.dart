@@ -14,6 +14,7 @@ import 'servicios_screen.dart';
 import '../widgets/gestion_pilotos_dialog.dart';
 import '../models/piloto_model.dart';
 import '../widgets/registro_bitacora_dialog.dart';
+import '../widgets/registro_cobro_servicio_dialog.dart';
 import 'bitacoras_historial_screen.dart';
 
 class CronogramaScreen extends StatefulWidget {
@@ -1111,15 +1112,10 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                     }
                     if (ctx.mounted) Navigator.pop(ctx);
                   } else if (st == 'COMPLETADO') {
-                    await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
-                      'estado': 'COMPLETADO',
-                    });
-                    s.estado = 'COMPLETADO';
                     if (ctx.mounted) Navigator.pop(ctx);
-
-                    // Ofrecer registrar la bitácora o completarlo sin ella
+                    // Ofrecer registrar el cobro contable y luego la bitácora
                     if (context.mounted) {
-                      _ofrecerRegistroBitacora(context, s);
+                      RegistroCobroServicioDialog.mostrar(context, s, abrirBitacoraDespues: true);
                     }
                   } else {
                     await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
@@ -1134,89 +1130,6 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
             );
           }).toList(),
         ),
-      ),
-    );
-  }
-
-  void _ofrecerRegistroBitacora(BuildContext context, ServicioModel s) {
-    final isDark = AgroTheme.isDark(context);
-    final text = AgroTheme.getText(context);
-    final cardBg = AgroTheme.getCard(context);
-
-    showDialog(
-      context: context,
-      builder: (modalCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        backgroundColor: cardBg,
-        title: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: const Color(0xFF2E7D32).withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.check_circle_outline, color: Color(0xFF2E7D32), size: 22),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                '¡Vuelo Completado!',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: text),
-              ),
-            ),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'El vuelo de ${s.cultivo} para ${s.clienteNombre} (${s.hectareas} Ha) ha sido marcado como completado.',
-              style: TextStyle(fontSize: 13, color: text),
-            ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.teal.withValues(alpha: isDark ? 0.15 : 0.08),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.teal.withValues(alpha: 0.3)),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.history_edu_rounded, color: Colors.teal, size: 20),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      '¿Deseas registrar la Bitácora de lo que pasó en el vuelo (hectáreas reales, clima, baterías, novedades)?',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(modalCtx),
-            child: const Text('Omitir / Solo Completar', style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-          ),
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D32),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            icon: const Icon(Icons.edit_note, size: 18),
-            label: const Text('Registrar Bitácora', style: TextStyle(fontWeight: FontWeight.bold)),
-            onPressed: () {
-              Navigator.pop(modalCtx);
-              RegistroBitacoraDialog.mostrar(context, s);
-            },
-          ),
-        ],
       ),
     );
   }
