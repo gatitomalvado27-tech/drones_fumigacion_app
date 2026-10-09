@@ -52,8 +52,8 @@
 - **Cronograma de Vuelos:** [`CronogramaScreen`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/screens/cronograma_screen.dart)
   - Operación en tiempo real. Al marcar un vuelo como `COMPLETADO`, invoca automáticamente [`RegistroCobroServicioDialog`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/widgets/registro_cobro_servicio_dialog.dart).
 - **Contabilidad y Finanzas:** [`ContabilidadScreen`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/screens/contabilidad_screen.dart)
-  - Pestaña 1: Balance de caja líquida y cuentas bancarias, con **Tarjeta de Conciliación Automática** para vuelos completados sin cobro registrado.
-  - Pestaña 2: Cuentas por Cobrar (Cartera general de clientes).
+  - Pestaña 1: Balance de caja líquida y cuentas bancarias, sincronizado automáticamente con la programación de vuelos.
+  - Pestaña 2: Cuentas por Cobrar (Cartera general de clientes y vuelos pendientes).
   - Pestaña 3: Cierres y balances mensuales archivables.
 - **Historial Unificado de Bitácoras:** [`BitacorasHistorialScreen`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/screens/bitacoras_historial_screen.dart)
   - **Pestaña 1:** Vuelos y Campo (informes agronómicos de lotes y mezcla).
@@ -63,8 +63,10 @@
   - Filtros por equipo (`DRON`, `CAMIONETA`, etc.) y estado, visor de fotos, enlace a video y botón directo a **Ficha PDF**.
 - **Vida Útil de Repuestos:** [`RepuestosVidaUtilScreen`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/screens/repuestos_vida_util_screen.dart)
   - Barras de progreso, botón `+ Sumar Uso`, botón `Reemplazar` con archivo de historial y asiento en contabilidad.
-- **Servicio de PDF:** [`PdfService`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/services/pdf_service.dart)
-  - Generación de Órdenes de Servicio, Balances Financieros, Estados de Cuenta, Cartera y la **Ficha Técnica Oficial de Daños e Inspección**.
+- **Servicios Clave:**
+  - [`ContabilidadAutoService`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/services/contabilidad_auto_service.dart): Motor automático que sincroniza vuelos, caja, cartera, anulaciones por cancelación y eliminación atómica.
+  - [`NotificationService`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/services/notification_service.dart): Recordatorios locales programados 1 hora antes y al momento del despegue, sincronizados en tiempo real entre todos los usuarios vía Firestore.
+  - [`PdfService`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/services/pdf_service.dart): Generación de Órdenes de Servicio, Balances Financieros, Estados de Cuenta, Cartera y la **Ficha Técnica Oficial de Daños e Inspección**.
 - **Diálogos Clave:**
   - [`RegistroCobroServicioDialog`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/widgets/registro_cobro_servicio_dialog.dart): Cobro total, abono parcial o crédito.
   - [`RegistroBitacoraDialog`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/widgets/registro_bitacora_dialog.dart): Registro agronómico de vuelo.
@@ -74,6 +76,7 @@
 ---
 
 ## 6. Reglas de Negocio Esenciales
-1. **Regla Contable de Vuelos:** Ningún vuelo debe quedar en `COMPLETADO` sin haber registrado su cobro en `transacciones` o asignado su saldo a cartera. La tarjeta de conciliación en Contabilidad previene desajustes.
-2. **Imágenes en Base64:** Para evitar dependencias externas o configuraciones de storage adicionales, las fotos se comprimen y guardan en Base64 directamente en Firestore.
-3. **Mantenimiento vs Contabilidad:** Al registrar un costo de reparación o reemplazo de repuestos, el sistema ofrece asentar automáticamente un `EGRESO` contable bajo la categoría `'MANTENIMIENTO'`.
+1. **Regla Contable de Vuelos:** Flujo contable 100% automático e inteligente gestionado por [`ContabilidadAutoService`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/services/contabilidad_auto_service.dart). Cada vuelo programado se refleja de inmediato en Cuentas por Cobrar (cartera) y patrimonio; si se marca como pagado ingresa a caja; si se cancela o elimina, se anula de manera atómica sin dejar descuadres ni tarjetas invasivas.
+2. **Notificaciones y Alarmas Previas:** Todo vuelo programado genera recordatorio local 1 hora antes y a la hora exacta del despegue. La suscripción en tiempo real de Firestore en [`HomeScreen`](file:///c:/Users/ASUS/drones_fumigacion_app/lib/screens/home_screen.dart) garantiza que cualquier piloto o usuario con la app instalada reciba los avisos automáticamente.
+3. **Imágenes en Base64:** Para evitar dependencias externas o configuraciones de storage adicionales, las fotos se comprimen y guardan en Base64 directamente en Firestore.
+4. **Mantenimiento vs Contabilidad:** Al registrar un costo de reparación o reemplazo de repuestos, el sistema ofrece asentar automáticamente un `EGRESO` contable bajo la categoría `'MANTENIMIENTO'`.

@@ -15,6 +15,7 @@ import '../widgets/gestion_pilotos_dialog.dart';
 import '../models/piloto_model.dart';
 import '../widgets/registro_bitacora_dialog.dart';
 import '../widgets/registro_cobro_servicio_dialog.dart';
+import '../services/contabilidad_auto_service.dart';
 import 'bitacoras_historial_screen.dart';
 
 class CronogramaScreen extends StatefulWidget {
@@ -1028,23 +1029,8 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
             onPressed: () async {
               Navigator.pop(ctx);
               if (s.id != null) {
-                // 1. Eliminar servicio de Firestore
-                await FirebaseFirestore.instance.collection('servicios').doc(s.id).delete();
-
-                // 2. Eliminar transacciones si existieran
-                final snapTrans = await FirebaseFirestore.instance
-                    .collection('transacciones')
-                    .where('servicioId', isEqualTo: s.id)
-                    .get();
-                for (var doc in snapTrans.docs) {
-                  await doc.reference.delete();
-                }
-
-                // 3. Eliminar bitacora_vuelo si existiera
-                await FirebaseFirestore.instance.collection('bitacoras_vuelo').doc(s.id).delete();
-
-                // 4. Cancelar notificación
-                await NotificationService.instance.cancelarRecordatorioVuelo(s.id!);
+                // Elimina servicio, transacciones, bitácora y recordatorios
+                await ContabilidadAutoService.eliminarServicio(s.id!);
 
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -1082,49 +1068,37 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                 color: seleccionado ? AgroTheme.getPrimary(context) : AgroTheme.getBorder(context),
               ),
               onTap: () async {
-                if (s.id != null) {
-                  if (st == 'CANCELADO') {
-                    // 1. Marcar estado como cancelado y pagado como false
-                    await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
-                      'estado': 'CANCELADO',
-                      'pagado': false,
-                    });
+                if (ctx.mounted) Navigator.pop(ctx);
+                if (s.id == null || s.estado == st) return;
 
-                    // 2. Anular/eliminar cualquier ingreso o cobro en transacciones
-                    final snapTrans = await FirebaseFirestore.instance
-                        .collection('transacciones')
-                        .where('servicioId', isEqualTo: s.id)
-                        .get();
-                    for (var doc in snapTrans.docs) {
-                      await doc.reference.delete();
-                    }
+                await ContabilidadAutoService.cambiarEstado(s, st);
+                if (!context.mounted) return;
 
-                    // 3. Cancelar recordatorio de vuelo
-                    await NotificationService.instance.cancelarRecordatorioVuelo(s.id!);
-
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text('Operación cancelada. El cobro e ingreso fueron anulados en Contabilidad.'),
-                          backgroundColor: AgroTheme.error,
-                        ),
-                      );
-                    }
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  } else if (st == 'COMPLETADO') {
-                    if (ctx.mounted) Navigator.pop(ctx);
-                    // Ofrecer registrar el cobro contable y luego la bitácora
-                    if (context.mounted) {
-                      RegistroCobroServicioDialog.mostrar(context, s, abrirBitacoraDespues: true);
-                    }
-                  } else {
-                    await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
-                      'estado': st,
-                    });
-                    if (ctx.mounted) Navigator.pop(ctx);
-                  }
-                } else {
-                  if (ctx.mounted) Navigator.pop(ctx);
+                final messenger = ScaffoldMessenger.of(context);
+                if (st == 'CANCELADO') {
+                  messenger.showSnackBar(
+                    const SnackBar(
+                      content: Text('Vuelo cancelado. Sus ingresos y recordatorios se anularon automáticamente.'),
+                      backgroundColor: AgroTheme.error,
+                    ),
+                  );
+                } else if (st == 'COMPLETADO') {
+                  messenger.showSnackBar(
+                    SnackBar(
+                      content: Text(s.pagado
+                          ? '¡Vuelo completado! Ya está reflejado en caja.'
+                          : 'Vuelo completado. Quedó automáticamente en Cuentas por Cobrar.'),
+                      backgroundColor: const Color(0xFF2E7D32),
+                      duration: const Duration(seconds: 5),
+                      action: s.pagado
+                          ? null
+                          : SnackBarAction(
+                              label: 'COBRAR',
+                              textColor: Colors.white,
+                              onPressed: () => RegistroCobroServicioDialog.mostrar(context, s, abrirBitacoraDespues: true),
+                            ),
+                    ),
+                  );
                 }
               },
             );
@@ -1492,8 +1466,11 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                       piloto: piloto,
                       pilotoColorHex: pilotoColorHex,
                       dron: dron,
+                      totalAbonado: s.totalAbonado,
                     );
                     NotificationService.instance.programarRecordatorioVuelo(servicioActualizado);
+                    // Reflejar automáticamente en caja / cartera
+                    await ContabilidadAutoService.sincronizarServicio(servicioActualizado);
 
                     if (ctx.mounted) Navigator.pop(ctx);
                     if (context.mounted) {

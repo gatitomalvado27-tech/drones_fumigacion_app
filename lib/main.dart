@@ -26,14 +26,15 @@ void main() async {
   await initializeDateFormatting('es', null);
   await initializeDateFormatting('es_CO', null);
 
-  // Inicializar servicio de notificaciones locales para el piloto
-  await NotificationService.instance.inicializar();
-
-  // Cargar preferencia de tema (Oscuro o Blanco)
-  await ThemeController.instance.inicializar();
+  // Inicializaciones independientes en paralelo para un arranque más rápido
+  final resultados = await Future.wait<Object?>([
+    NotificationService.instance.inicializar(), // Notificaciones locales (sin bloquear con permisos)
+    ThemeController.instance.inicializar(), // Preferencia de tema (Oscuro o Blanco)
+    SharedPreferences.getInstance(),
+  ]);
 
   // Verificar si el dispositivo ya fue autorizado con el PIN
-  final prefs = await SharedPreferences.getInstance();
+  final prefs = resultados[2] as SharedPreferences;
   final bool estaAutorizado = prefs.getBool('proicaro_dispositivo_autorizado') ?? false;
 
   runApp(MyApp(estaAutorizado: estaAutorizado));

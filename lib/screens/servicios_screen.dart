@@ -12,6 +12,7 @@ import '../services/notification_service.dart';
 import '../utils/operaciones_helper.dart';
 import '../services/pdf_service.dart';
 import '../widgets/registro_cobro_servicio_dialog.dart';
+import '../services/contabilidad_auto_service.dart';
 
 class ServiciosScreen extends StatefulWidget {
   final DateTime? fechaInicial;
@@ -537,40 +538,36 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
   }
 
   void _actualizarEstadoServicio(ServicioModel servicio, String nuevoEstado) async {
-    if (servicio.id == null) return;
+    if (servicio.id == null || servicio.estado == nuevoEstado) return;
 
-    await FirebaseFirestore.instance.collection('servicios').doc(servicio.id).update({
-      'estado': nuevoEstado,
-    });
+    await ContabilidadAutoService.cambiarEstado(servicio, nuevoEstado);
+    if (!mounted) return;
 
+    final messenger = ScaffoldMessenger.of(context);
     if (nuevoEstado == 'COMPLETADO') {
-      if (mounted) {
-        RegistroCobroServicioDialog.mostrar(context, servicio, abrirBitacoraDespues: true);
-      }
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(servicio.pagado
+              ? '¡Vuelo completado! Ya está reflejado en caja.'
+              : 'Vuelo completado. Quedó automáticamente en Cuentas por Cobrar.'),
+          backgroundColor: const Color(0xFF2E7D32),
+          duration: const Duration(seconds: 5),
+          action: servicio.pagado
+              ? null
+              : SnackBarAction(
+                  label: 'COBRAR',
+                  textColor: Colors.white,
+                  onPressed: () => RegistroCobroServicioDialog.mostrar(context, servicio, abrirBitacoraDespues: true),
+                ),
+        ),
+      );
     } else if (nuevoEstado == 'CANCELADO') {
-      // Revertir contabilidad si estaba pagado o registrado
-      await FirebaseFirestore.instance.collection('servicios').doc(servicio.id).update({
-        'pagado': false,
-      });
-
-      final transSnap = await FirebaseFirestore.instance
-          .collection('transacciones')
-          .where('servicioId', isEqualTo: servicio.id)
-          .get();
-      for (var doc in transSnap.docs) {
-        await doc.reference.delete();
-      }
-
-      await NotificationService.instance.cancelarRecordatorio(servicio.id!);
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Operación cancelada. Se actualizaron los registros contables.'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
-      }
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Vuelo cancelado. Sus ingresos y recordatorios se anularon automáticamente.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
     }
   }
 
@@ -586,8 +583,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
               if (servicio.id != null) {
-                await FirebaseFirestore.instance.collection('servicios').doc(servicio.id).delete();
-                await FirebaseFirestore.instance.collection('bitacoras_vuelo').doc(servicio.id).delete();
+                // Elimina servicio, ingresos asociados, bitácora y recordatorios
+                await ContabilidadAutoService.eliminarServicio(servicio.id!);
               }
               if (ctx.mounted) Navigator.pop(ctx);
             },
@@ -1362,6 +1359,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                 piloto: piloto,
                                 pilotoColorHex: pilotoColorHex,
                                 dron: dron,
+                                totalAbonado: servicioAEditar?.totalAbonado,
                               );
 
                               if (servicioAEditar == null) {
@@ -1378,6 +1376,9 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                     .update(servicioAGuardar.toMap());
                                 await NotificationService.instance.programarRecordatorioVuelo(servicioAGuardar);
                               }
+
+                              // Reflejar automáticamente en caja (si está pagado) o en cartera
+                              await ContabilidadAutoService.sincronizarServicio(servicioAGuardar);
 
                               if (context.mounted) {
                                 Navigator.pop(context);

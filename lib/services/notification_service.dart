@@ -1,6 +1,9 @@
+import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:timezone/data/latest_all.dart' as tz;
 import 'package:timezone/timezone.dart' as tz;
 import '../models/servicio_model.dart';
@@ -13,15 +16,30 @@ class NotificationService {
       FlutterLocalNotificationsPlugin();
 
   bool _isInitialized = false;
+  bool _puedeAlarmaExacta = true;
+
+  /// Suscripción en tiempo real a los vuelos para mantener los recordatorios
+  /// sincronizados en todos los dispositivos que usan la app.
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _subVuelos;
+
+  /// Firma (estado+fecha+cliente) del último recordatorio programado por vuelo,
+  /// para no reprogramar en cada snapshot si nada cambió.
+  final Map<String, String> _firmasProgramadas = {};
 
   static const String canalOperacionesId = 'icaroproagro_operaciones';
   static const String canalVuelosId = 'icaroproagro_vuelos';
+
+  /// Minutos de anticipación del recordatorio principal.
+  static const int minutosAnticipacion = 60;
 
   Future<void> inicializar() async {
     if (_isInitialized) return;
 
     try {
       tz.initializeTimeZones();
+      try {
+        tz.setLocalLocation(tz.getLocation('America/Bogota'));
+      } catch (_) {}
 
       const AndroidInitializationSettings androidSettings =
           AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -45,14 +63,10 @@ class NotificationService {
         },
       );
 
-      // Crear canales con máxima prioridad y solicitar permisos en Android
-      final androidImplementation =
-          _notificationsPlugin.resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>();
+      // Crear canales con máxima prioridad (los permisos se piden luego,
+      // sin bloquear el arranque de la app)
+      final androidImplementation = _android;
       if (androidImplementation != null) {
-        await androidImplementation.requestNotificationsPermission();
-        await androidImplementation.requestExactAlarmsPermission();
-
         await androidImplementation.createNotificationChannel(
           const AndroidNotificationChannel(
             canalOperacionesId,
@@ -81,6 +95,80 @@ class NotificationService {
       debugPrint('Error inicializando NotificationService: $e');
     }
   }
+
+  AndroidFlutterLocalNotificationsPlugin? get _android =>
+      _notificationsPlugin.resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>();
+
+  /// Solicita permisos de notificación y de alarmas exactas.
+  /// El ajuste de alarmas exactas solo se abre una vez para no molestar al usuario.
+  Future<void> solicitarPermisos() async {
+    if (!_isInitialized) await inicializar();
+    final android = _android;
+    if (android == null) return;
+    try {
+      await android.requestNotificationsPermission();
+
+      _puedeAlarmaExacta = await android.canScheduleExactNotifications() ?? true;
+      if (!_puedeAlarmaExacta) {
+        final prefs = await SharedPreferences.getInstance();
+        final yaSolicitado = prefs.getBool('icaro_permiso_alarma_exacta_solicitado') ?? false;
+        if (!yaSolicitado) {
+          await prefs.setBool('icaro_permiso_alarma_exacta_solicitado', true);
+          await android.requestExactAlarmsPermission();
+          _puedeAlarmaExacta = await android.canScheduleExactNotifications() ?? false;
+        }
+      }
+    } catch (e) {
+      debugPrint('Error solicitando permisos de notificación: $e');
+    }
+  }
+
+  /// Escucha en tiempo real los vuelos futuros de Firestore y programa/cancela
+  /// los recordatorios en este dispositivo. Así TODOS los usuarios de la app
+  /// reciben el aviso, no solo quien agendó el vuelo.
+  void iniciarSincronizacionRecordatorios() {
+    if (_subVuelos != null) return;
+    final desde = DateTime.now().subtract(const Duration(hours: 2));
+    _subVuelos = FirebaseFirestore.instance
+        .collection('servicios')
+        .where('fecha', isGreaterThanOrEqualTo: desde.toIso8601String())
+        .snapshots()
+        .listen(
+      (snap) async {
+        for (final change in snap.docChanges) {
+          final id = change.doc.id;
+          if (change.type == DocumentChangeType.removed) {
+            await cancelarRecordatorioVuelo(id);
+            continue;
+          }
+          final data = change.doc.data();
+          if (data == null) continue;
+          await programarRecordatorioVuelo(ServicioModel.fromMap(id, data));
+        }
+      },
+      onError: (e) => debugPrint('Error sincronizando recordatorios: $e'),
+    );
+  }
+
+  Future<void> detenerSincronizacionRecordatorios() async {
+    await _subVuelos?.cancel();
+    _subVuelos = null;
+  }
+
+  /// ID estable (FNV-1a de 31 bits) para que todos los dispositivos y
+  /// reinicios usen el mismo identificador por vuelo.
+  static int _idEstable(String texto) {
+    int hash = 0x811c9dc5;
+    for (final c in texto.codeUnits) {
+      hash ^= c;
+      hash = (hash * 0x01000193) & 0x7fffffff;
+    }
+    return hash;
+  }
+
+  static int _idPrevio(String servicioId) => _idEstable('previo_$servicioId');
+  static int _idDespegue(String servicioId) => _idEstable('despegue_$servicioId');
 
   /// Muestra una notificación inmediata en el dispositivo con alta prioridad
   Future<void> mostrarNotificacionInmediata({
@@ -172,83 +260,110 @@ class NotificationService {
     );
   }
 
-  /// Programa una notificación para recordar un vuelo programado antes del despegue
+  static const NotificationDetails _detallesVuelo = NotificationDetails(
+    android: AndroidNotificationDetails(
+      canalVuelosId,
+      'Recordatorios de Vuelo Icaro Proagro',
+      channelDescription: 'Avisos previos a la operación de fumigación',
+      importance: Importance.max,
+      priority: Priority.high,
+      category: AndroidNotificationCategory.reminder,
+      playSound: true,
+      enableVibration: true,
+      icon: '@mipmap/ic_launcher',
+    ),
+    iOS: DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+    ),
+  );
+
+  Future<void> _agendar(int id, String titulo, String cuerpo, DateTime fecha, String? payload) async {
+    final scheduledDate = tz.TZDateTime.from(fecha, tz.local);
+    Future<void> intentar(AndroidScheduleMode modo) => _notificationsPlugin.zonedSchedule(
+          id,
+          titulo,
+          cuerpo,
+          scheduledDate,
+          _detallesVuelo,
+          uiLocalNotificationDateInterpretation: UILocalNotificationDateInterpretation.absoluteTime,
+          androidScheduleMode: modo,
+          payload: payload,
+        );
+    try {
+      await intentar(_puedeAlarmaExacta
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle);
+    } catch (e) {
+      // Si el sistema no permite alarmas exactas, usar modo inexacto como respaldo
+      debugPrint('Alarma exacta no disponible, usando modo inexacto: $e');
+      _puedeAlarmaExacta = false;
+      await intentar(AndroidScheduleMode.inexactAllowWhileIdle);
+    }
+  }
+
+  /// Programa los recordatorios de un vuelo:
+  /// 1. Aviso 1 hora antes (o 15 min antes si se agenda con poca anticipación).
+  /// 2. Aviso a la hora exacta del despegue.
+  /// Si el vuelo ya no está PROGRAMADO, cancela sus recordatorios.
   Future<void> programarRecordatorioVuelo(ServicioModel s) async {
     if (!_isInitialized) await inicializar();
-    if (s.id == null) return;
+    final servicioId = s.id;
+    if (servicioId == null) return;
 
-    final id = s.id.hashCode;
     final now = DateTime.now();
     final fechaVuelo = s.fecha;
 
-    if (fechaVuelo.isBefore(now)) return; // Vuelo ya pasado
-
-    // Lógica adaptativa de recordatorio:
-    // 1. Si faltan más de 2 horas: avisar 2 horas antes
-    // 2. Si faltan entre 20 min y 2 horas: avisar 15 minutos antes
-    // 3. Si falta menos: no programar alarma previa
-    DateTime fechaAlerta;
-    String tituloAlerta;
-
-    final diferencia = fechaVuelo.difference(now);
-    if (diferencia.inHours >= 2) {
-      fechaAlerta = fechaVuelo.subtract(const Duration(hours: 2));
-      tituloAlerta = '🚁 Vuelo Próximo en 2 Horas';
-    } else if (diferencia.inMinutes >= 20) {
-      fechaAlerta = fechaVuelo.subtract(const Duration(minutes: 15));
-      tituloAlerta = '🚁 Despegue en 15 Minutos';
-    } else {
+    if (s.estado != 'PROGRAMADO' || !fechaVuelo.isAfter(now)) {
+      await cancelarRecordatorioVuelo(servicioId);
       return;
     }
 
-    if (fechaAlerta.isBefore(now)) return;
+    // Evitar reprogramar si nada relevante cambió
+    final firma = '${s.estado}|${fechaVuelo.toIso8601String()}|${s.clienteNombre}|${s.piloto}|${s.hectareas}';
+    if (_firmasProgramadas[servicioId] == firma) return;
+
+    await cancelarRecordatorioVuelo(servicioId);
+
+    final horaStr = DateFormat('hh:mm a', 'es_CO').format(fechaVuelo);
+    final pilotoInfo = s.piloto.isNotEmpty ? ' • Piloto: ${s.piloto}' : '';
+    final dronInfo = s.dron.isNotEmpty ? ' • ${s.dron}' : '';
+    final detalle = '${s.clienteNombre} (${s.fincaUbicacion}) • ${s.hectareas} Ha de ${s.cultivo}$pilotoInfo$dronInfo';
 
     try {
-      final tz.TZDateTime scheduledDate = tz.TZDateTime.from(fechaAlerta, tz.local);
+      // 1. Aviso previo
+      final restante = fechaVuelo.difference(now);
+      DateTime? fechaPrevia;
+      String tituloPrevio = '';
+      if (restante.inMinutes > minutosAnticipacion) {
+        fechaPrevia = fechaVuelo.subtract(const Duration(minutes: minutosAnticipacion));
+        tituloPrevio = '🚁 Vuelo en 1 hora ($horaStr)';
+      } else if (restante.inMinutes > 20) {
+        fechaPrevia = fechaVuelo.subtract(const Duration(minutes: 15));
+        tituloPrevio = '🚁 Despegue en 15 minutos ($horaStr)';
+      }
+      if (fechaPrevia != null && fechaPrevia.isAfter(now)) {
+        await _agendar(_idPrevio(servicioId), tituloPrevio, 'Tienes programación: $detalle', fechaPrevia, servicioId);
+      }
 
-      final String pilotoInfo = s.piloto.isNotEmpty ? ' • Piloto: ${s.piloto}' : '';
-      final String dronInfo = s.dron.isNotEmpty ? ' • Dron: ${s.dron}' : '';
+      // 2. Aviso a la hora del vuelo
+      await _agendar(_idDespegue(servicioId), '⏰ Es hora del vuelo ($horaStr)', detalle, fechaVuelo, servicioId);
 
-      const AndroidNotificationDetails androidDetails =
-          AndroidNotificationDetails(
-        canalVuelosId,
-        'Recordatorios de Vuelo Icaro Proagro',
-        channelDescription: 'Avisos previos a la operación de fumigación',
-        importance: Importance.max,
-        priority: Priority.high,
-        playSound: true,
-        enableVibration: true,
-      );
-
-      const NotificationDetails notificationDetails = NotificationDetails(
-        android: androidDetails,
-        iOS: DarwinNotificationDetails(
-          presentAlert: true,
-          presentBadge: true,
-          presentSound: true,
-        ),
-      );
-
-      await _notificationsPlugin.zonedSchedule(
-        id,
-        tituloAlerta,
-        '${s.clienteNombre} (${s.fincaUbicacion}) - ${s.hectareas} Ha de ${s.cultivo}$pilotoInfo$dronInfo',
-        scheduledDate,
-        notificationDetails,
-        uiLocalNotificationDateInterpretation:
-            UILocalNotificationDateInterpretation.absoluteTime,
-        androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
-        payload: s.id,
-      );
+      _firmasProgramadas[servicioId] = firma;
     } catch (e) {
       debugPrint('Error programando recordatorio de vuelo: $e');
     }
   }
 
-  /// Cancela la notificación programada si se cancela o elimina el servicio
+  /// Cancela las notificaciones programadas si se cancela, completa o elimina el servicio
   Future<void> cancelarRecordatorioVuelo(String servicioId) async {
+    _firmasProgramadas.remove(servicioId);
     try {
-      await _notificationsPlugin.cancel(servicioId.hashCode);
+      await _notificationsPlugin.cancel(_idPrevio(servicioId));
+      await _notificationsPlugin.cancel(_idDespegue(servicioId));
+      // Compatibilidad con recordatorios creados por versiones anteriores
+      await _notificationsPlugin.cancel(servicioId.hashCode & 0x7fffffff);
     } catch (e) {
       debugPrint('Error cancelando notificación: $e');
     }

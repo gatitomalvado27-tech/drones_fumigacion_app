@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/notification_service.dart';
 import 'dashboard_screen.dart';
 import 'agenda_screen.dart';
 import 'cronograma_screen.dart';
@@ -14,10 +15,12 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   int _currentIndex = 0;
+  late final List<Widget> _screens;
 
   @override
-  Widget build(BuildContext context) {
-    final List<Widget> screens = [
+  void initState() {
+    super.initState();
+    _screens = [
       DashboardScreen(
         onVerTodasTareas: () {
           setState(() => _currentIndex = 2); // Va a la pestaña de Cronograma
@@ -28,6 +31,17 @@ class _HomeScreenState extends State<HomeScreen> {
       const BodegaScreen(),
       const ContabilidadScreen(),
     ];
+
+    // Tras el primer frame: pedir permisos y sincronizar recordatorios de vuelos
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await NotificationService.instance.solicitarPermisos();
+      NotificationService.instance.iniciarSincronizacionRecordatorios();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final screens = _screens;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
