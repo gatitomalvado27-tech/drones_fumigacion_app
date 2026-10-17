@@ -4,6 +4,7 @@ class ServicioModel {
   String? id;
   String clienteId;
   String clienteNombre;
+  String clienteCedula;
   String clienteTelefono;
   String fincaUbicacion;
   DateTime fecha;
@@ -28,6 +29,7 @@ class ServicioModel {
     this.id,
     required this.clienteId,
     required this.clienteNombre,
+    this.clienteCedula = '',
     required this.clienteTelefono,
     required this.fincaUbicacion,
     required this.fecha,
@@ -70,6 +72,7 @@ class ServicioModel {
     return {
       'clienteId': clienteId,
       'clienteNombre': clienteNombre,
+      'clienteCedula': clienteCedula,
       'clienteTelefono': clienteTelefono,
       'fincaUbicacion': fincaUbicacion,
       'fecha': fecha.toIso8601String(),
@@ -103,6 +106,7 @@ class ServicioModel {
       id: id,
       clienteId: map['clienteId'] ?? '',
       clienteNombre: map['clienteNombre'] ?? '',
+      clienteCedula: map['clienteCedula'] ?? '',
       clienteTelefono: map['clienteTelefono'] ?? '',
       fincaUbicacion: map['fincaUbicacion'] ?? '',
       fecha: map['fecha'] != null ? DateTime.parse(map['fecha']) : DateTime.now(),

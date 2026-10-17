@@ -12,11 +12,17 @@ import '../services/notification_service.dart';
 import '../utils/operaciones_helper.dart';
 import '../services/pdf_service.dart';
 import '../widgets/registro_cobro_servicio_dialog.dart';
+import '../widgets/progreso_predio_dialog.dart';
 import '../services/contabilidad_auto_service.dart';
 
 class ServiciosScreen extends StatefulWidget {
   final DateTime? fechaInicial;
-  const ServiciosScreen({super.key, this.fechaInicial});
+  final ClienteModel? clientePreseleccionado;
+  const ServiciosScreen({
+    super.key,
+    this.fechaInicial,
+    this.clientePreseleccionado,
+  });
 
   @override
   State<ServiciosScreen> createState() => _ServiciosScreenState();
@@ -36,9 +42,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
       _selectedDay = widget.fechaInicial!;
       _focusedDay = widget.fechaInicial!;
       _filtrarPorDia = true;
+    }
+    if (widget.fechaInicial != null || widget.clientePreseleccionado != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          _mostrarDialogoAgendarServicio(context);
+          _mostrarDialogoAgendarServicio(
+            context,
+            clientePreseleccionado: widget.clientePreseleccionado,
+          );
         }
       });
     }
@@ -342,6 +353,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         servicio.clienteNombre,
                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                       ),
+                      if (servicio.clienteCedula.isNotEmpty)
+                        Text(
+                          '🪪 C.C. / NIT: ${servicio.clienteCedula}',
+                          style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+                        ),
                       Text(
                         '📍 ${servicio.fincaUbicacion}',
                         style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
@@ -396,6 +412,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   servicio.metodoPago == 'EN_LINEA' ? Colors.cyan.shade100 : Colors.teal.shade100,
                   servicio.metodoPago == 'EN_LINEA' ? Colors.cyan.shade900 : Colors.teal.shade900,
                 ),
+                if (servicio.pagado)
+                  _buildTag('✓ Pagado', Colors.green.shade100, Colors.green.shade900)
+                else if (servicio.totalAbonado > 0)
+                  _buildTag(
+                    'Abonado: ${_currencyFormat.format(servicio.totalAbonado)}',
+                    Colors.amber.shade100,
+                    Colors.amber.shade900,
+                  ),
               ],
             ),
 
@@ -433,6 +457,22 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.end,
               children: [
+                // Progreso Fotográfico del Predio
+                IconButton(
+                  tooltip: 'Progreso Fotográfico del Predio',
+                  icon: const Icon(Icons.photo_camera_back_outlined, color: Color(0xFF00897B)),
+                  onPressed: () => ProgresoPredioDialog.mostrar(
+                    context,
+                    clienteId: servicio.clienteId,
+                    clienteNombre: servicio.clienteNombre,
+                    clienteCedula: servicio.clienteCedula,
+                    fincaUbicacion: servicio.fincaUbicacion,
+                    cultivoInicial: servicio.cultivo,
+                    servicioId: servicio.id,
+                    pilotoInicial: servicio.piloto,
+                  ),
+                ),
+
                 // Calculadora de Insumos & Baterías
                 IconButton(
                   tooltip: 'Calculadora Insumos & Baterías',
@@ -638,7 +678,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                     TextField(
                       autofocus: true,
                       decoration: InputDecoration(
-                        hintText: 'Escribe nombre, finca o teléfono...',
+                        hintText: 'Escribe nombre, cédula, finca o teléfono...',
                         prefixIcon: const Icon(Icons.search),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -660,6 +700,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           final filtrados = clientes.where((c) {
                             if (query.isEmpty) return true;
                             return c.nombre.toLowerCase().contains(query) ||
+                                c.cedula.toLowerCase().contains(query) ||
                                 c.ubicacion.toLowerCase().contains(query) ||
                                 c.telefono.toLowerCase().contains(query);
                           }).toList();
@@ -693,8 +734,29 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                     style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold),
                                   ),
                                 ),
-                                title: Text(c.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
-                                subtitle: Text('📍 ${c.ubicacion}  •  📞 ${c.telefono}'),
+                                title: Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(c.nombre, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    ),
+                                    if (c.saldoAFavor > 0)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.teal.shade50,
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(color: Colors.teal.shade300),
+                                        ),
+                                        child: Text(
+                                          '💳 A favor: ${_currencyFormat.format(c.saldoAFavor)}',
+                                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.teal.shade800),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                subtitle: Text(
+                                  '${c.cedula.isNotEmpty ? "🪪 ${c.cedula}  •  " : ""}📍 ${c.ubicacion}  •  📞 ${c.telefono}',
+                                ),
                                 onTap: () {
                                   onSeleccionado(c);
                                   Navigator.pop(ctx);
@@ -715,19 +777,30 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     );
   }
 
-  void _mostrarDialogoAgendarServicio(BuildContext context, {ServicioModel? servicioAEditar}) {
+  void _mostrarDialogoAgendarServicio(
+    BuildContext context, {
+    ServicioModel? servicioAEditar,
+    ClienteModel? clientePreseleccionado,
+  }) {
     final formKey = GlobalKey<FormState>();
 
-    String clienteId = servicioAEditar?.clienteId ?? '';
-    String clienteNombre = servicioAEditar?.clienteNombre ?? '';
-    String clienteTelefono = servicioAEditar?.clienteTelefono ?? '';
-    String fincaUbicacion = servicioAEditar?.fincaUbicacion ?? '';
+    String clienteId = servicioAEditar?.clienteId ?? clientePreseleccionado?.id ?? '';
+    String clienteNombre = servicioAEditar?.clienteNombre ?? clientePreseleccionado?.nombre ?? '';
+    String clienteCedula = servicioAEditar?.clienteCedula ?? clientePreseleccionado?.cedula ?? '';
+    String clienteTelefono = servicioAEditar?.clienteTelefono ?? clientePreseleccionado?.telefono ?? '';
+    String fincaUbicacion = servicioAEditar?.fincaUbicacion ?? clientePreseleccionado?.ubicacion ?? '';
+    double saldoAFavorDisponible = servicioAEditar == null ? (clientePreseleccionado?.saldoAFavor ?? 0.0) : 0.0;
+    bool aplicarSaldoAFavor = saldoAFavorDisponible > 0;
+
     DateTime fechaSeleccionada = servicioAEditar?.fecha ?? _selectedDay;
     TimeOfDay horaSeleccionada = servicioAEditar != null
         ? TimeOfDay(hour: servicioAEditar.fecha.hour, minute: servicioAEditar.fecha.minute)
         : TimeOfDay.now();
     double hectareas = servicioAEditar?.hectareas ?? 1.0;
-    String cultivo = servicioAEditar?.cultivo ?? 'Arroz';
+    String cultivo = servicioAEditar?.cultivo ??
+        (clientePreseleccionado?.cultivoPrincipal != null && clientePreseleccionado!.cultivoPrincipal!.isNotEmpty
+            ? clientePreseleccionado.cultivoPrincipal!
+            : 'Arroz');
     String tipoAplicacion = servicioAEditar?.tipoAplicacion ?? 'Fungicida';
     String productoQuimico = servicioAEditar?.productoQuimico ?? '';
     double precioPorHectarea = servicioAEditar?.precioPorHectarea ?? 50000;
@@ -772,6 +845,10 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setModalState) {
             final double precioTotal = hectareas * precioPorHectarea;
+            final double montoAplicarDeSaldo = (servicioAEditar == null && aplicarSaldoAFavor && saldoAFavorDisponible > 0)
+                ? (saldoAFavorDisponible >= precioTotal ? precioTotal : saldoAFavorDisponible)
+                : 0.0;
+            final double restanteTrasSaldo = (precioTotal - montoAplicarDeSaldo).clamp(0.0, double.infinity);
 
             return Padding(
               padding: EdgeInsets.only(
@@ -821,6 +898,16 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                         ),
                         const SizedBox(height: 10),
                         TextFormField(
+                          initialValue: clienteCedula,
+                          decoration: const InputDecoration(
+                            labelText: 'Cédula / NIT del Cliente',
+                            prefixIcon: Icon(Icons.badge_outlined),
+                            border: OutlineInputBorder(),
+                          ),
+                          onSaved: (val) => clienteCedula = val?.trim() ?? '',
+                        ),
+                        const SizedBox(height: 10),
+                        TextFormField(
                           initialValue: fincaUbicacion,
                           decoration: const InputDecoration(
                             labelText: 'Finca / Ubicación',
@@ -838,8 +925,14 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                 setModalState(() {
                                   clienteId = c.id ?? '';
                                   clienteNombre = c.nombre;
+                                  clienteCedula = c.cedula;
                                   clienteTelefono = c.telefono;
                                   fincaUbicacion = c.ubicacion;
+                                  saldoAFavorDisponible = c.saldoAFavor;
+                                  aplicarSaldoAFavor = c.saldoAFavor > 0;
+                                  if (c.cultivoPrincipal != null && c.cultivoPrincipal!.isNotEmpty) {
+                                    cultivo = c.cultivoPrincipal!;
+                                  }
                                 });
                               },
                             ),
@@ -865,7 +958,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                         ),
                                         const SizedBox(height: 2),
                                         Text(
-                                          'Toca para buscar por nombre, finca o teléfono',
+                                          'Toca para buscar por nombre, cédula, finca o teléfono',
                                           style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                                         ),
                                       ],
@@ -900,6 +993,8 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(clienteNombre, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                      if (clienteCedula.isNotEmpty)
+                                        Text('🪪 C.C. / NIT: $clienteCedula', style: TextStyle(fontSize: 11.5, color: Colors.grey.shade800)),
                                       Text('📍 $fincaUbicacion', style: TextStyle(fontSize: 12, color: Colors.grey.shade800)),
                                       if (clienteTelefono.isNotEmpty)
                                         Text('📞 $clienteTelefono', style: TextStyle(fontSize: 11, color: Colors.grey.shade700)),
@@ -916,8 +1011,11 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                       setModalState(() {
                                         clienteId = c.id ?? '';
                                         clienteNombre = c.nombre;
+                                        clienteCedula = c.cedula;
                                         clienteTelefono = c.telefono;
                                         fincaUbicacion = c.ubicacion;
+                                        saldoAFavorDisponible = c.saldoAFavor;
+                                        aplicarSaldoAFavor = c.saldoAFavor > 0;
                                       });
                                     },
                                   ),
@@ -925,6 +1023,54 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                               ],
                             ),
                           ),
+                          if (saldoAFavorDisponible > 0) ...[
+                            const SizedBox(height: 10),
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.teal.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.teal.shade400, width: 1.5),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(Icons.account_balance_wallet, color: Colors.teal.shade800, size: 20),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          'Saldo a Favor Disponible: ${_currencyFormat.format(saldoAFavorDisponible)}',
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 13.5,
+                                            color: Colors.teal.shade900,
+                                          ),
+                                        ),
+                                      ),
+                                      Switch(
+                                        value: aplicarSaldoAFavor,
+                                        activeThumbColor: Colors.teal.shade700,
+                                        onChanged: (v) => setModalState(() => aplicarSaldoAFavor = v),
+                                      ),
+                                    ],
+                                  ),
+                                  if (aplicarSaldoAFavor)
+                                    Text(
+                                      '✓ Se descontarán ${_currencyFormat.format(montoAplicarDeSaldo)} automáticamente de este vuelo. '
+                                      '${restanteTrasSaldo <= 0 ? "¡El vuelo quedará 100% PAGADO!" : "Saldo restante por cobrar: ${_currencyFormat.format(restanteTrasSaldo)}"}',
+                                      style: TextStyle(fontSize: 11.5, color: Colors.teal.shade800, fontWeight: FontWeight.w600),
+                                    )
+                                  else
+                                    Text(
+                                      'El saldo a favor se conservará intacto para otro momento.',
+                                      style: TextStyle(fontSize: 11, color: Colors.grey.shade700),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ],
                       ],
 
@@ -1252,18 +1398,56 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(color: Colors.green.shade300),
                         ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        child: Column(
                           children: [
-                            const Text('Total a Cobrar:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                            Text(
-                              _currencyFormat.format(precioTotal),
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.green.shade800,
-                              ),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text('Total Operación:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+                                Text(
+                                  _currencyFormat.format(precioTotal),
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.green.shade800,
+                                  ),
+                                ),
+                              ],
                             ),
+                            if (montoAplicarDeSaldo > 0) ...[
+                              const Divider(height: 12),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    'Menos Saldo a Favor:',
+                                    style: TextStyle(fontSize: 12.5, color: Colors.teal.shade800, fontWeight: FontWeight.w600),
+                                  ),
+                                  Text(
+                                    '- ${_currencyFormat.format(montoAplicarDeSaldo)}',
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.teal.shade800),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 4),
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  const Text(
+                                    'Neto Restante por Cobrar:',
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                                  ),
+                                  Text(
+                                    _currencyFormat.format(restanteTrasSaldo),
+                                    style: TextStyle(
+                                      fontSize: 15,
+                                      fontWeight: FontWeight.bold,
+                                      color: restanteTrasSaldo <= 0 ? Colors.green.shade900 : Colors.orange.shade900,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -1339,10 +1523,21 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                 horaSeleccionada.minute,
                               );
 
+                              final double totalCalc = hectareas * precioPorHectarea;
+                              double? abonoInicial = servicioAEditar?.totalAbonado;
+                              bool pagadoFinal = pagado;
+
+                              if (servicioAEditar == null && aplicarSaldoAFavor && saldoAFavorDisponible > 0) {
+                                final double aplicado = saldoAFavorDisponible >= totalCalc ? totalCalc : saldoAFavorDisponible;
+                                abonoInicial = aplicado;
+                                pagadoFinal = aplicado >= (totalCalc - 1.0);
+                              }
+
                               final servicioAGuardar = ServicioModel(
                                 id: servicioAEditar?.id,
                                 clienteId: clienteId,
                                 clienteNombre: clienteNombre,
+                                clienteCedula: clienteCedula,
                                 clienteTelefono: clienteTelefono,
                                 fincaUbicacion: fincaUbicacion,
                                 fecha: fechaHora,
@@ -1351,15 +1546,15 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                 tipoAplicacion: tipoAplicacion,
                                 productoQuimico: productoQuimico,
                                 precioPorHectarea: precioPorHectarea,
-                                precioTotal: hectareas * precioPorHectarea,
+                                precioTotal: totalCalc,
                                 estado: estado,
-                                pagado: pagado,
+                                pagado: pagadoFinal,
                                 notas: notas,
                                 metodoPago: metodoPago,
                                 piloto: piloto,
                                 pilotoColorHex: pilotoColorHex,
                                 dron: dron,
-                                totalAbonado: servicioAEditar?.totalAbonado,
+                                totalAbonado: abonoInicial,
                               );
 
                               if (servicioAEditar == null) {
@@ -1367,6 +1562,15 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                     .collection('servicios')
                                     .add(servicioAGuardar.toMap());
                                 servicioAGuardar.id = docRef.id;
+
+                                if (aplicarSaldoAFavor && saldoAFavorDisponible > 0 && abonoInicial != null && abonoInicial > 0) {
+                                  await ContabilidadAutoService.descontarSaldoAFavorCliente(
+                                    clienteId: clienteId,
+                                    clienteNombre: clienteNombre,
+                                    montoAAplicar: abonoInicial,
+                                  );
+                                }
+
                                 await NotificationService.instance.programarRecordatorioVuelo(servicioAGuardar);
                                 await NotificationService.instance.notificarNuevoVuelo(servicioAGuardar);
                               } else {
@@ -1384,7 +1588,13 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                 Navigator.pop(context);
                                 ScaffoldMessenger.of(context).showSnackBar(
                                   SnackBar(
-                                    content: Text(servicioAEditar == null ? '¡Vuelo agendado con éxito!' : '¡Vuelo programado actualizado con éxito!'),
+                                    content: Text(
+                                      servicioAEditar == null
+                                          ? (abonoInicial != null && abonoInicial > 0
+                                              ? '¡Vuelo agendado! Se aplicaron ${_currencyFormat.format(abonoInicial)} del Saldo a Favor.'
+                                              : '¡Vuelo agendado con éxito!')
+                                          : '¡Vuelo programado actualizado con éxito!',
+                                    ),
                                   ),
                                 );
                               }

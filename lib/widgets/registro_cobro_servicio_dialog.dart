@@ -5,6 +5,7 @@ import '../models/servicio_model.dart';
 import '../models/transaccion_model.dart';
 import '../theme/agro_theme.dart';
 import '../services/notification_service.dart';
+import '../services/contabilidad_auto_service.dart';
 import 'registro_bitacora_dialog.dart';
 
 enum TipoGestionCobro {
@@ -68,6 +69,9 @@ class _RegistroCobroServicioDialogState extends State<RegistroCobroServicioDialo
         : widget.servicio.precioTotal;
 
     _montoAbonoController = TextEditingController(text: saldo.toStringAsFixed(0));
+    _montoAbonoController.addListener(() {
+      if (mounted) setState(() {});
+    });
     _notaController = TextEditingController();
   }
 
@@ -135,22 +139,27 @@ class _RegistroCobroServicioDialogState extends State<RegistroCobroServicioDialo
           ),
         );
       } else if (_tipoCobro == TipoGestionCobro.parcial) {
-        // 2. Abono Parcial
+        // 2. Abono Parcial o Pago + Anticipo para futura programación
         final abono = double.tryParse(_montoAbonoController.text.replaceAll('.', '').replaceAll(',', '').trim()) ?? 0.0;
-        final nuevoTotalAbonado = s.totalAbonado + abono;
+        final double montoOperacion = abono > saldoActual ? saldoActual : abono;
+        final double excedenteFuturo = abono > saldoActual ? (abono - saldoActual) : 0.0;
+
+        final nuevoTotalAbonado = (s.totalAbonado + montoOperacion).clamp(0.0, s.precioTotal);
         final bool quedaPagado = nuevoTotalAbonado >= (s.precioTotal - 1.0);
         final saldoRestante = (s.precioTotal - nuevoTotalAbonado).clamp(0.0, double.infinity);
 
-        await FirebaseFirestore.instance.collection('transacciones').add({
-          'tipo': 'INGRESO',
-          'categoria': 'SERVICIO',
-          'monto': abono,
-          'descripcion': 'Abono Fumigación ${s.cultivo} (${s.hectareas} Ha) - ${s.clienteNombre}$notaTexto',
-          'fecha': DateTime.now().toIso8601String(),
-          'clienteNombre': s.clienteNombre,
-          'servicioId': s.id,
-          'metodoPago': _metodoPago,
-        });
+        if (montoOperacion > 0) {
+          await FirebaseFirestore.instance.collection('transacciones').add({
+            'tipo': 'INGRESO',
+            'categoria': 'SERVICIO',
+            'monto': montoOperacion,
+            'descripcion': '${quedaPagado ? "Pago" : "Abono"} Fumigación ${s.cultivo} (${s.hectareas} Ha) - ${s.clienteNombre}$notaTexto',
+            'fecha': DateTime.now().toIso8601String(),
+            'clienteNombre': s.clienteNombre,
+            'servicioId': s.id,
+            'metodoPago': _metodoPago,
+          });
+        }
 
         if (s.id != null) {
           await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
@@ -165,6 +174,29 @@ class _RegistroCobroServicioDialogState extends State<RegistroCobroServicioDialo
           s.metodoPago = _metodoPago;
         }
 
+        if (excedenteFuturo > 0) {
+          // Registrar el anticipo en Caja y sumarlo al Saldo a Favor del cliente en Agenda / Cliente 360°
+          await FirebaseFirestore.instance.collection('transacciones').add({
+            'tipo': 'INGRESO',
+            'categoria': 'ANTICIPO_CLIENTE',
+            'monto': excedenteFuturo,
+            'descripcion': 'Anticipo / Saldo a favor para futura programación - ${s.clienteNombre}$notaTexto',
+            'fecha': DateTime.now().toIso8601String(),
+            'clienteNombre': s.clienteNombre,
+            'metodoPago': _metodoPago,
+          });
+
+          await ContabilidadAutoService.sumarSaldoAFavorCliente(
+            clienteId: s.clienteId,
+            clienteNombre: s.clienteNombre,
+            clienteCedula: s.clienteCedula,
+            clienteTelefono: s.clienteTelefono,
+            fincaUbicacion: s.fincaUbicacion,
+            cultivo: s.cultivo,
+            montoExcedente: excedenteFuturo,
+          );
+        }
+
         NotificationService.instance.notificarAbonoRegistrado(
           cliente: s.clienteNombre,
           monto: abono,
@@ -173,8 +205,12 @@ class _RegistroCobroServicioDialogState extends State<RegistroCobroServicioDialo
 
         messenger.showSnackBar(
           SnackBar(
-            content: Text('¡Abono de ${_currencyFormat.format(abono)} registrado! Resta: ${_currencyFormat.format(saldoRestante)}'),
-            backgroundColor: Colors.teal,
+            content: Text(
+              excedenteFuturo > 0
+                  ? '¡Operación saldada + ${_currencyFormat.format(excedenteFuturo)} guardados como Saldo a Favor en Cliente 360°!'
+                  : '¡Abono de ${_currencyFormat.format(abono)} registrado! Resta: ${_currencyFormat.format(saldoRestante)}',
+            ),
+            backgroundColor: excedenteFuturo > 0 ? const Color(0xFF0284C7) : Colors.teal,
           ),
         );
       } else {
@@ -263,6 +299,11 @@ class _RegistroCobroServicioDialogState extends State<RegistroCobroServicioDialo
 
     final s = widget.servicio;
     final saldo = s.saldoPendiente > 0 ? s.saldoPendiente : s.precioTotal;
+    final montoIngresado = double.tryParse(
+          _montoAbonoController.text.replaceAll('.', '').replaceAll(',', '').trim(),
+        ) ??
+        0.0;
+    final excedente = montoIngresado > saldo ? (montoIngresado - saldo) : 0.0;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -375,7 +416,7 @@ class _RegistroCobroServicioDialogState extends State<RegistroCobroServicioDialo
                       Expanded(
                         child: _buildTipoOpcion(
                           tipo: TipoGestionCobro.parcial,
-                          titulo: 'Abono Parcial',
+                          titulo: 'Abono / Anticipo',
                           icono: Icons.pie_chart_outline,
                           color: Colors.teal,
                         ),
@@ -400,19 +441,56 @@ class _RegistroCobroServicioDialogState extends State<RegistroCobroServicioDialo
                       controller: _montoAbonoController,
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
-                        labelText: 'Monto del Abono Recibido (\$ COP) *',
+                        labelText: 'Monto Recibido (\$ COP) *',
                         prefixIcon: const Icon(Icons.attach_money),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                        helperText: 'El saldo restante quedará en Cuentas por Cobrar',
+                        helperText: 'Puedes ingresar más del saldo para abonar a una futura programación',
                       ),
                       validator: (val) {
-                        if (val == null || val.trim().isEmpty) return 'Ingresa el monto del abono';
+                        if (val == null || val.trim().isEmpty) return 'Ingresa el monto recibido';
                         final numVal = double.tryParse(val.replaceAll('.', '').replaceAll(',', '').trim());
                         if (numVal == null || numVal <= 0) return 'Monto inválido';
-                        if (numVal > saldo) return 'El abono supera el saldo pendiente (${_currencyFormat.format(saldo)})';
                         return null;
                       },
                     ),
+                    if (excedente > 0) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0284C7).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.5)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(Icons.savings_rounded, color: Colors.lightBlueAccent, size: 18),
+                                SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Abono con Saldo a Favor para Futura Programación',
+                                    style: TextStyle(
+                                      color: Colors.lightBlueAccent,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '• Pago operación actual: ${_currencyFormat.format(saldo)} (100% Pagado)\n'
+                              '• Saldo a Favor en Cliente 360°: +${_currencyFormat.format(excedente)}',
+                              style: TextStyle(fontSize: 11.5, color: text, height: 1.4),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                   ],
 

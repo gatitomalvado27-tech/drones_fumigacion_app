@@ -11,6 +11,7 @@ import '../models/deuda_model.dart';
 import '../models/cliente_model.dart';
 import '../services/pdf_service.dart';
 import '../services/notification_service.dart';
+import '../services/contabilidad_auto_service.dart';
 import '../utils/crop_helper.dart';
 import 'historial_balances_screen.dart';
 
@@ -3547,20 +3548,28 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
     final formKey = GlobalKey<FormState>();
     final saldoActual = s.saldoPendiente;
     final controller = TextEditingController();
-    String metodoPago = s.metodoPago;
+    String metodoPago = TransaccionModel.metodosPagoMap.containsKey(s.metodoPago)
+        ? s.metodoPago
+        : 'EFECTIVO';
     String notaAbono = '';
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setModalState) {
+          final montoIngresado = double.tryParse(
+                controller.text.replaceAll('.', '').replaceAll(',', '').trim(),
+              ) ??
+              0.0;
+          final excedente = montoIngresado > saldoActual ? (montoIngresado - saldoActual) : 0.0;
+
           return AlertDialog(
             backgroundColor: Theme.of(context).colorScheme.surface,
-            title: Row(
+            title: const Row(
               children: [
-                const Icon(Icons.payments_outlined, color: Colors.teal),
-                const SizedBox(width: 8),
-                const Expanded(child: Text('Registrar Abono')),
+                Icon(Icons.payments_outlined, color: Colors.teal),
+                SizedBox(width: 8),
+                Expanded(child: Text('Registrar Abono / Anticipo')),
               ],
             ),
             content: Form(
@@ -3619,20 +3628,37 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                     const SizedBox(height: 14),
                     TextFormField(
                       controller: controller,
+                      onChanged: (_) => setModalState(() {}),
                       decoration: const InputDecoration(
-                        labelText: 'Monto del Abono (\$)',
+                        labelText: 'Monto Recibido (\$)',
                         prefixText: '\$ ',
                         hintText: 'Ej. 250000',
+                        helperText: 'Si supera el saldo, el excedente queda a favor para futura programación',
                       ),
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
                       validator: (val) {
                         if (val == null || val.trim().isEmpty) return 'Ingrese un monto';
                         final numVal = double.tryParse(val.replaceAll('.', '').replaceAll(',', '').trim());
                         if (numVal == null || numVal <= 0) return 'Monto inválido';
-                        if (numVal > saldoActual + 1.0) return 'Supera el saldo (${_currencyFormat.format(saldoActual)})';
                         return null;
                       },
                     ),
+                    if (excedente > 0) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0284C7).withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.5)),
+                        ),
+                        child: Text(
+                          '💡 Pago operación actual: ${_currencyFormat.format(saldoActual)} (100% Saldado)\n'
+                          '✨ Saldo a Favor en Cliente 360°: +${_currencyFormat.format(excedente)}',
+                          style: const TextStyle(fontSize: 11.5, color: Colors.lightBlueAccent, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     // Quick chips para agilizar
                     SingleChildScrollView(
@@ -3643,6 +3669,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                             label: const Text('Todo el Saldo', style: TextStyle(fontSize: 11)),
                             onPressed: () {
                               controller.text = saldoActual.toStringAsFixed(0);
+                              setModalState(() {});
                             },
                           ),
                           const SizedBox(width: 6),
@@ -3650,6 +3677,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                             label: const Text('50%', style: TextStyle(fontSize: 11)),
                             onPressed: () {
                               controller.text = (saldoActual * 0.5).round().toString();
+                              setModalState(() {});
                             },
                           ),
                           const SizedBox(width: 6),
@@ -3657,6 +3685,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                             label: const Text('30%', style: TextStyle(fontSize: 11)),
                             onPressed: () {
                               controller.text = (saldoActual * 0.3).round().toString();
+                              setModalState(() {});
                             },
                           ),
                         ],
@@ -3665,11 +3694,13 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
                       initialValue: metodoPago,
-                      decoration: const InputDecoration(labelText: 'Método de Pago'),
-                      items: const [
-                        DropdownMenuItem(value: 'EFECTIVO', child: Text('💵 Efectivo')),
-                        DropdownMenuItem(value: 'EN_LINEA', child: Text('💳 Transferencia / En Línea')),
-                      ],
+                      decoration: const InputDecoration(labelText: 'Cuenta / Método de Pago'),
+                      items: TransaccionModel.metodosPagoMap.entries.map((e) {
+                        return DropdownMenuItem<String>(
+                          value: e.key,
+                          child: Text(e.value, style: const TextStyle(fontSize: 13)),
+                        );
+                      }).toList(),
                       onChanged: (val) => setModalState(() => metodoPago = val ?? 'EFECTIVO'),
                     ),
                     const SizedBox(height: 10),
@@ -3693,7 +3724,10 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                     formKey.currentState!.save();
 
                     final montoAbono = double.parse(controller.text.replaceAll('.', '').replaceAll(',', '').trim());
-                    final nuevoTotalAbonado = s.totalAbonado + montoAbono;
+                    final montoOperacion = montoAbono > saldoActual ? saldoActual : montoAbono;
+                    final excedenteFuturo = montoAbono > saldoActual ? (montoAbono - saldoActual) : 0.0;
+
+                    final nuevoTotalAbonado = (s.totalAbonado + montoOperacion).clamp(0.0, s.precioTotal);
                     final bool quedaPagado = nuevoTotalAbonado >= (s.precioTotal - 1.0);
                     final saldoRestante = (s.precioTotal - nuevoTotalAbonado).clamp(0.0, double.infinity);
 
@@ -3707,16 +3741,40 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                     }
 
                     final descNota = notaAbono.isNotEmpty ? ' ($notaAbono)' : '';
-                    await FirebaseFirestore.instance.collection('transacciones').add({
-                      'tipo': 'INGRESO',
-                      'categoria': 'SERVICIO',
-                      'monto': montoAbono,
-                      'descripcion': 'Abono Fumigación ${s.cultivo} (${s.hectareas} Ha) - ${s.clienteNombre}$descNota',
-                      'fecha': DateTime.now().toIso8601String(),
-                      'clienteNombre': s.clienteNombre,
-                      'servicioId': s.id,
-                      'metodoPago': metodoPago,
-                    });
+                    if (montoOperacion > 0) {
+                      await FirebaseFirestore.instance.collection('transacciones').add({
+                        'tipo': 'INGRESO',
+                        'categoria': 'SERVICIO',
+                        'monto': montoOperacion,
+                        'descripcion': '${quedaPagado ? "Pago" : "Abono"} Fumigación ${s.cultivo} (${s.hectareas} Ha) - ${s.clienteNombre}$descNota',
+                        'fecha': DateTime.now().toIso8601String(),
+                        'clienteNombre': s.clienteNombre,
+                        'servicioId': s.id,
+                        'metodoPago': metodoPago,
+                      });
+                    }
+
+                    if (excedenteFuturo > 0) {
+                      await FirebaseFirestore.instance.collection('transacciones').add({
+                        'tipo': 'INGRESO',
+                        'categoria': 'ANTICIPO_CLIENTE',
+                        'monto': excedenteFuturo,
+                        'descripcion': 'Anticipo / Saldo a favor para futura programación - ${s.clienteNombre}$descNota',
+                        'fecha': DateTime.now().toIso8601String(),
+                        'clienteNombre': s.clienteNombre,
+                        'metodoPago': metodoPago,
+                      });
+
+                      await ContabilidadAutoService.sumarSaldoAFavorCliente(
+                        clienteId: s.clienteId,
+                        clienteNombre: s.clienteNombre,
+                        clienteCedula: s.clienteCedula,
+                        clienteTelefono: s.clienteTelefono,
+                        fincaUbicacion: s.fincaUbicacion,
+                        cultivo: s.cultivo,
+                        montoExcedente: excedenteFuturo,
+                      );
+                    }
 
                     NotificationService.instance.notificarAbonoRegistrado(
                       cliente: s.clienteNombre,
@@ -3729,7 +3787,11 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
 
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(
-                        content: Text('¡Abono de ${_currencyFormat.format(montoAbono)} registrado!'),
+                        content: Text(
+                          excedenteFuturo > 0
+                              ? '¡Operación saldada + ${_currencyFormat.format(excedenteFuturo)} guardados en Saldo a Favor de Cliente 360°!'
+                              : '¡Abono de ${_currencyFormat.format(montoAbono)} registrado!',
+                        ),
                         duration: const Duration(seconds: 7),
                         action: SnackBarAction(
                           label: 'Recibo WhatsApp',

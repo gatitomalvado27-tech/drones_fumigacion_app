@@ -15,6 +15,7 @@ import '../widgets/gestion_pilotos_dialog.dart';
 import '../models/piloto_model.dart';
 import '../widgets/registro_bitacora_dialog.dart';
 import '../widgets/registro_cobro_servicio_dialog.dart';
+import '../widgets/progreso_predio_dialog.dart';
 import '../services/contabilidad_auto_service.dart';
 import 'bitacoras_historial_screen.dart';
 
@@ -875,6 +876,21 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
+                IconButton(
+                  tooltip: 'Fotos de Progreso del Predio',
+                  icon: const Icon(Icons.photo_camera_back_outlined, size: 20),
+                  color: const Color(0xFF00897B),
+                  onPressed: () => ProgresoPredioDialog.mostrar(
+                    context,
+                    clienteId: s.clienteId,
+                    clienteNombre: s.clienteNombre,
+                    clienteCedula: s.clienteCedula,
+                    fincaUbicacion: s.fincaUbicacion,
+                    cultivoInicial: s.cultivo,
+                    servicioId: s.id,
+                    pilotoInicial: s.piloto,
+                  ),
+                ),
                 IconButton(
                   tooltip: 'Calculadora de Insumos y Baterías',
                   icon: const Icon(Icons.calculate_outlined, size: 20),

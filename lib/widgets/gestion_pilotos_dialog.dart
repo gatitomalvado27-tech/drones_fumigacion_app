@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/piloto_model.dart';
 import '../theme/agro_theme.dart';
+import 'firma_digital_dialog.dart';
 
 class GestionPilotosDialog extends StatefulWidget {
   const GestionPilotosDialog({super.key});
@@ -43,7 +45,7 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
       backgroundColor: cardBg,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 450, maxHeight: 580),
+        constraints: const BoxConstraints(maxWidth: 460, maxHeight: 610),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Column(
@@ -75,7 +77,7 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
                             ),
                           ),
                           Text(
-                            'Personal y colores en cronograma',
+                            'Personal, colores y firma digital para PDFs',
                             style: TextStyle(fontSize: 11, color: subtext),
                           ),
                         ],
@@ -110,7 +112,7 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
                             Icon(Icons.person_off_outlined, size: 40, color: subtext.withValues(alpha: 0.5)),
                             const SizedBox(height: 8),
                             Text(
-                              'No hay pilotos registrados aún.\nAgrega uno para asignarle color a los vuelos.',
+                              'No hay pilotos registrados aún.\nAgrega uno para asignarle color y firma digital.',
                               textAlign: TextAlign.center,
                               style: TextStyle(color: subtext, fontSize: 12),
                             ),
@@ -123,6 +125,7 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
                       itemCount: pilotos.length,
                       itemBuilder: (context, index) {
                         final p = pilotos[index];
+                        final tieneFirma = p.firmaBase64 != null && p.firmaBase64!.isNotEmpty;
                         return Container(
                           margin: const EdgeInsets.only(bottom: 8),
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -134,7 +137,7 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
                           child: Row(
                             children: [
                               CircleAvatar(
-                                radius: 14,
+                                radius: 15,
                                 backgroundColor: p.color,
                                 child: Text(
                                   p.nombre.isNotEmpty ? p.nombre[0].toUpperCase() : 'P',
@@ -150,20 +153,77 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                      p.nombre,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.bold,
-                                        color: text,
-                                      ),
+                                    Row(
+                                      children: [
+                                        Flexible(
+                                          child: Text(
+                                            p.nombre,
+                                            style: TextStyle(
+                                              fontSize: 13,
+                                              fontWeight: FontWeight.bold,
+                                              color: text,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: tieneFirma
+                                                ? Colors.green.withValues(alpha: 0.18)
+                                                : Colors.amber.withValues(alpha: 0.15),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Text(
+                                            tieneFirma ? '✓ Firmado' : 'Sin firma',
+                                            style: TextStyle(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.bold,
+                                              color: tieneFirma ? Colors.greenAccent : Colors.amberAccent,
+                                            ),
+                                          ),
+                                        ),
+                                      ],
                                     ),
-                                    if (p.telefono.isNotEmpty)
+                                    if (p.cedula.isNotEmpty || p.telefono.isNotEmpty)
                                       Text(
-                                        p.telefono,
+                                        [
+                                          if (p.cedula.isNotEmpty) 'C.C. ${p.cedula}',
+                                          if (p.telefono.isNotEmpty) p.telefono,
+                                        ].join(' • '),
                                         style: TextStyle(fontSize: 11, color: subtext),
                                       ),
                                   ],
+                                ),
+                              ),
+                              Tooltip(
+                                message: 'Configurar Firma Digital PDF',
+                                child: IconButton(
+                                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                                  padding: EdgeInsets.zero,
+                                  icon: Icon(
+                                    Icons.draw_rounded,
+                                    size: 18,
+                                    color: tieneFirma ? Colors.greenAccent : Colors.amberAccent,
+                                  ),
+                                  onPressed: () async {
+                                    final nuevaFirma = await showDialog<String>(
+                                      context: context,
+                                      builder: (_) => FirmaDigitalDialog(
+                                        firmaActualBase64: p.firmaBase64,
+                                        nombrePiloto: p.nombre,
+                                      ),
+                                    );
+                                    if (nuevaFirma != null && p.id != null) {
+                                      await FirebaseFirestore.instance
+                                          .collection('pilotos')
+                                          .doc(p.id)
+                                          .update({
+                                        'firmaBase64': nuevaFirma.isEmpty ? null : nuevaFirma,
+                                      });
+                                    }
+                                  },
                                 ),
                               ),
                               IconButton(
@@ -216,9 +276,11 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
 
   void _mostrarFormularioPiloto(BuildContext context, PilotoModel? pilotoExistente) {
     final nombreCtrl = TextEditingController(text: pilotoExistente?.nombre ?? '');
+    final cedulaCtrl = TextEditingController(text: pilotoExistente?.cedula ?? '');
     final telCtrl = TextEditingController(text: pilotoExistente?.telefono ?? '');
     final licCtrl = TextEditingController(text: pilotoExistente?.licencia ?? '');
     String colorSeleccionado = pilotoExistente?.colorHex ?? coloresDisponibles[0];
+    String? firmaBase64 = pilotoExistente?.firmaBase64;
 
     showDialog(
       context: context,
@@ -228,7 +290,7 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
           final primary = AgroTheme.getPrimary(context);
 
           return AlertDialog(
-            title: Text(pilotoExistente == null ? 'Nuevo Piloto' : 'Editar Piloto'),
+            title: Text(pilotoExistente == null ? 'Nuevo Piloto / Operador' : 'Editar Piloto / Operador'),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -241,6 +303,15 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
                       border: OutlineInputBorder(),
                     ),
                     autofocus: true,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: cedulaCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Cédula / Documento (Para firma PDF)',
+                      border: OutlineInputBorder(),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -304,6 +375,54 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
                       );
                     }).toList(),
                   ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Firma Digital (Aparece en PDFs de cobro y balances):',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: text),
+                  ),
+                  const SizedBox(height: 8),
+                  if (firmaBase64 != null && firmaBase64!.isNotEmpty) ...[
+                    Container(
+                      height: 80,
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: primary),
+                      ),
+                      child: Image.memory(
+                        base64Decode(firmaBase64!),
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: () async {
+                        final res = await showDialog<String>(
+                          context: ctx,
+                          builder: (_) => FirmaDigitalDialog(
+                            firmaActualBase64: firmaBase64,
+                            nombrePiloto: nombreCtrl.text.trim(),
+                          ),
+                        );
+                        if (res != null) {
+                          setDlgState(() {
+                            firmaBase64 = res.isEmpty ? null : res;
+                          });
+                        }
+                      },
+                      icon: const Icon(Icons.draw_rounded, size: 18),
+                      label: Text(
+                        firmaBase64 != null && firmaBase64!.isNotEmpty
+                            ? 'Cambiar / Borrar Firma Digital'
+                            : 'Dibujar o Subir Firma Digital',
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -324,10 +443,12 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
                   final model = PilotoModel(
                     id: pilotoExistente?.id,
                     nombre: nom,
+                    cedula: cedulaCtrl.text.trim(),
                     telefono: telCtrl.text.trim(),
                     licencia: licCtrl.text.trim(),
                     colorHex: colorSeleccionado,
                     activo: true,
+                    firmaBase64: firmaBase64,
                   );
 
                   if (pilotoExistente == null) {
@@ -347,3 +468,4 @@ class _GestionPilotosDialogState extends State<GestionPilotosDialog> {
     );
   }
 }
+

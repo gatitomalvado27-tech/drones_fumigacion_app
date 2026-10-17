@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
@@ -7,6 +8,9 @@ import 'package:printing/printing.dart';
 import '../models/transaccion_model.dart';
 import '../models/servicio_model.dart';
 import '../models/bitacora_dano_equipo_model.dart';
+import '../models/piloto_model.dart';
+import '../models/cliente_model.dart';
+import '../models/progreso_predio_model.dart';
 
 class PdfService {
   static final NumberFormat _currencyFormat = NumberFormat.currency(
@@ -14,6 +18,140 @@ class PdfService {
     symbol: '\$',
     decimalDigits: 0,
   );
+
+  /// Obtiene el piloto firmante (por nombre exacto o el primer operador activo con firma digital)
+  static Future<PilotoModel?> _obtenerPilotoFirmante([String? nombrePiloto]) async {
+    try {
+      final snap = await FirebaseFirestore.instance.collection('pilotos').get();
+      if (snap.docs.isEmpty) return null;
+      final pilotos = snap.docs
+          .map((d) => PilotoModel.fromMap(d.id, d.data()))
+          .toList();
+
+      if (nombrePiloto != null && nombrePiloto.trim().isNotEmpty) {
+        final busq = nombrePiloto.trim().toLowerCase();
+        for (final p in pilotos) {
+          if (p.nombre.trim().toLowerCase() == busq &&
+              p.firmaBase64 != null &&
+              p.firmaBase64!.isNotEmpty) {
+            return p;
+          }
+        }
+        for (final p in pilotos) {
+          if (p.nombre.trim().toLowerCase() == busq) {
+            // Si el piloto existe pero no tiene firma propia, intenta usar una firma registrada o retorna sus datos
+            final conFirma = pilotos.where((x) => x.firmaBase64 != null && x.firmaBase64!.isNotEmpty).firstOrNull;
+            if (conFirma != null) {
+              return PilotoModel(
+                id: p.id,
+                nombre: p.nombre,
+                cedula: p.cedula.isNotEmpty ? p.cedula : conFirma.cedula,
+                telefono: p.telefono,
+                licencia: p.licencia,
+                firmaBase64: conFirma.firmaBase64,
+              );
+            }
+            return p;
+          }
+        }
+      }
+
+      // Fallback al primer piloto con firma digital configurada
+      for (final p in pilotos) {
+        if (p.firmaBase64 != null && p.firmaBase64!.isNotEmpty) {
+          return p;
+        }
+      }
+      return pilotos.first;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Obtiene información complementaria del cliente (Cédula/NIT y Saldo a Favor) desde Firestore
+  static Future<ClienteModel?> _obtenerClienteInfo({
+    String? clienteId,
+    required String clienteNombre,
+  }) async {
+    try {
+      final col = FirebaseFirestore.instance.collection('clientes');
+      if (clienteId != null && clienteId.isNotEmpty) {
+        final doc = await col.doc(clienteId).get();
+        if (doc.exists && doc.data() != null) {
+          return ClienteModel.fromMap(doc.id, doc.data()!);
+        }
+      }
+      final snap = await col.get();
+      final busq = clienteNombre.trim().toLowerCase();
+      for (final d in snap.docs) {
+        final c = ClienteModel.fromMap(d.id, d.data());
+        if (c.nombre.trim().toLowerCase() == busq) {
+          return c;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Construye el widget visual de firma digital para todos los PDFs
+  static pw.Widget _buildFirmaOperadorWidget({
+    required PilotoModel? piloto,
+    required String tituloRol,
+    required String subtituloNombreFallback,
+    required pw.Font fontBold,
+    required pw.Font fontRegular,
+    PdfColor grisBorde = const PdfColor.fromInt(0xFFCBD5E1),
+    PdfColor textoOscuro = const PdfColor.fromInt(0xFF0F172A),
+    PdfColor textoSecundario = const PdfColor.fromInt(0xFF475569),
+  }) {
+    Uint8List? firmaBytes;
+    if (piloto?.firmaBase64 != null && piloto!.firmaBase64!.isNotEmpty) {
+      try {
+        firmaBytes = base64Decode(piloto.firmaBase64!);
+      } catch (_) {}
+    }
+
+    final nombreMostrar = (piloto != null && piloto.nombre.isNotEmpty)
+        ? piloto.nombre
+        : subtituloNombreFallback;
+    final cedulaMostrar = (piloto != null && piloto.cedula.isNotEmpty)
+        ? 'C.C. ${piloto.cedula}'
+        : '';
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        if (firmaBytes != null && firmaBytes.isNotEmpty)
+          pw.Container(
+            height: 46,
+            width: 150,
+            alignment: pw.Alignment.bottomCenter,
+            padding: const pw.EdgeInsets.only(bottom: 2),
+            child: pw.Image(
+              pw.MemoryImage(firmaBytes),
+              fit: pw.BoxFit.contain,
+            ),
+          )
+        else
+          pw.SizedBox(height: 36),
+        pw.Container(width: 170, height: 1, color: grisBorde),
+        pw.SizedBox(height: 4),
+        pw.Text(
+          tituloRol,
+          style: pw.TextStyle(fontSize: 8.5, font: fontRegular, color: textoSecundario),
+        ),
+        pw.Text(
+          nombreMostrar,
+          style: pw.TextStyle(fontSize: 8.5, font: fontBold, color: textoOscuro),
+        ),
+        if (cedulaMostrar.isNotEmpty)
+          pw.Text(
+            cedulaMostrar,
+            style: pw.TextStyle(fontSize: 7.5, font: fontRegular, color: textoSecundario),
+          ),
+      ],
+    );
+  }
 
   static Future<void> generarYCompartirBalance({
     required String periodoTitulo,
@@ -29,6 +167,7 @@ class PdfService {
     Map<String, double>? ingresosPorCuenta,
   }) async {
     final pdf = pw.Document();
+    final pilotoFirmante = await _obtenerPilotoFirmante();
 
     // Cálculos financieros
     final Map<String, double> ingresosPorCuentaMap = Map.from(ingresosPorCuenta ?? {});
@@ -332,21 +471,26 @@ class PdfService {
           // FIRMAS
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.end,
             children: [
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  pw.Container(width: 160, height: 1, color: grisBorde),
-                  pw.SizedBox(height: 4),
-                  pw.Text('Firma Piloto / Operador', style: pw.TextStyle(fontSize: 8.5, font: fontRegular, color: textoSecundario)),
-                ],
+              _buildFirmaOperadorWidget(
+                piloto: pilotoFirmante,
+                tituloRol: 'Firma Piloto / Operador Autorizado',
+                subtituloNombreFallback: 'Operaciones Ícaro Proagro',
+                fontBold: fontBold,
+                fontRegular: fontRegular,
+                grisBorde: grisBorde,
+                textoOscuro: textoOscuro,
+                textoSecundario: textoSecundario,
               ),
               pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.center,
                 children: [
+                  pw.SizedBox(height: 36),
                   pw.Container(width: 160, height: 1, color: grisBorde),
                   pw.SizedBox(height: 4),
                   pw.Text('Firma Administrador / Contabilidad', style: pw.TextStyle(fontSize: 8.5, font: fontRegular, color: textoSecundario)),
+                  pw.Text('Ícaro Proagro Colombia', style: pw.TextStyle(fontSize: 8.5, font: fontBold, color: textoOscuro)),
                 ],
               ),
             ],
@@ -372,11 +516,27 @@ class PdfService {
   /// Genera y comparte el Estado de Cuenta / Informe de Deuda Individual por Cliente
   static Future<void> generarYCompartirEstadoCuentaCliente({
     required String clienteNombre,
+    String clienteCedula = '',
     required String clienteTelefono,
     required String fincaUbicacion,
     required List<ServicioModel> serviciosCliente,
+    double? saldoAFavorCliente,
   }) async {
     final pdf = pw.Document();
+
+    final pilotoRef = serviciosCliente.where((s) => s.piloto.isNotEmpty).firstOrNull?.piloto;
+    final pilotoFirmante = await _obtenerPilotoFirmante(pilotoRef);
+    final infoCliente = await _obtenerClienteInfo(
+      clienteId: serviciosCliente.firstOrNull?.clienteId,
+      clienteNombre: clienteNombre,
+    );
+
+    final String cedulaFinal = clienteCedula.trim().isNotEmpty
+        ? clienteCedula.trim()
+        : (serviciosCliente.where((s) => s.clienteCedula.isNotEmpty).firstOrNull?.clienteCedula ??
+            infoCliente?.cedula ??
+            '');
+    final double saldoAFavorFinal = saldoAFavorCliente ?? (infoCliente?.saldoAFavor ?? 0.0);
 
     final fontBold = await PdfGoogleFonts.interBold();
     final fontRegular = await PdfGoogleFonts.interRegular();
@@ -463,6 +623,8 @@ class PdfService {
                     children: [
                       pw.Text('CLIENTE: $clienteNombre', style: pw.TextStyle(font: fontBold, fontSize: 12, color: textoOscuro)),
                       pw.SizedBox(height: 4),
+                      if (cedulaFinal.isNotEmpty)
+                        pw.Text('Cédula / NIT: $cedulaFinal', style: pw.TextStyle(font: fontMedium, fontSize: 9.5, color: textoOscuro)),
                       pw.Text('Finca / Predio: $fincaUbicacion', style: pw.TextStyle(fontSize: 9.5, color: textoSecundario)),
                       pw.Text('Teléfono de Contacto: $clienteTelefono', style: pw.TextStyle(fontSize: 9.5, color: textoSecundario)),
                     ],
@@ -473,6 +635,13 @@ class PdfService {
                   children: [
                     pw.Text('Servicios Registrados: ${serviciosCliente.length}', style: pw.TextStyle(font: fontMedium, fontSize: 9.5)),
                     pw.Text('Hectáreas Totales: ${totalHectareas.toStringAsFixed(1)} Ha', style: pw.TextStyle(fontSize: 9.5, color: textoSecundario)),
+                    if (saldoAFavorFinal > 0) ...[
+                      pw.SizedBox(height: 3),
+                      pw.Text(
+                        'Saldo a Favor (Anticipo): ${_currencyFormat.format(saldoAFavorFinal)}',
+                        style: pw.TextStyle(font: fontBold, fontSize: 9.5, color: verdePrimario),
+                      ),
+                    ],
                   ],
                 ),
               ],
@@ -489,6 +658,10 @@ class PdfService {
               _buildKpiCard('TOTAL ABONADO', _currencyFormat.format(totalAbonado), verdePrimario, fontBold, fontRegular),
               pw.SizedBox(width: 8),
               _buildKpiCard('SALDO PENDIENTE', _currencyFormat.format(totalSaldoPendiente), totalSaldoPendiente > 0 ? naranjaAlerta : verdePrimario, fontBold, fontRegular),
+              if (saldoAFavorFinal > 0) ...[
+                pw.SizedBox(width: 8),
+                _buildKpiCard('SALDO A FAVOR', _currencyFormat.format(saldoAFavorFinal), const PdfColor.fromInt(0xFF0284C7), fontBold, fontRegular),
+              ],
             ],
           ),
 
@@ -529,7 +702,7 @@ class PdfService {
             mainAxisAlignment: pw.MainAxisAlignment.end,
             children: [
               pw.Container(
-                width: 250,
+                width: 260,
                 padding: const pw.EdgeInsets.all(10),
                 decoration: pw.BoxDecoration(
                   color: grisFondo,
@@ -553,6 +726,16 @@ class PdfService {
                         pw.Text('- ${_currencyFormat.format(totalAbonado)}', style: pw.TextStyle(font: fontMedium, fontSize: 10, color: verdePrimario)),
                       ],
                     ),
+                    if (saldoAFavorFinal > 0) ...[
+                      pw.SizedBox(height: 3),
+                      pw.Row(
+                        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                        children: [
+                          pw.Text('Anticipo / Saldo a Favor:', style: pw.TextStyle(fontSize: 9.5, color: const PdfColor.fromInt(0xFF0284C7))),
+                          pw.Text('+ ${_currencyFormat.format(saldoAFavorFinal)}', style: pw.TextStyle(font: fontBold, fontSize: 10, color: const PdfColor.fromInt(0xFF0284C7))),
+                        ],
+                      ),
+                    ],
                     pw.Divider(color: grisBorde, height: 10),
                     pw.Row(
                       mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -579,21 +762,28 @@ class PdfService {
           // FIRMAS
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.end,
             children: [
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  pw.Container(width: 170, height: 1, color: grisBorde),
-                  pw.SizedBox(height: 4),
-                  pw.Text('Firma Icaro Proagro (Autorizado)', style: pw.TextStyle(fontSize: 8.5, color: textoSecundario)),
-                ],
+              _buildFirmaOperadorWidget(
+                piloto: pilotoFirmante,
+                tituloRol: 'Firma Icaro Proagro (Autorizado)',
+                subtituloNombreFallback: 'Operaciones Ícaro Proagro',
+                fontBold: fontBold,
+                fontRegular: fontRegular,
+                grisBorde: grisBorde,
+                textoOscuro: textoOscuro,
+                textoSecundario: textoSecundario,
               ),
               pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.center,
                 children: [
+                  pw.SizedBox(height: 36),
                   pw.Container(width: 170, height: 1, color: grisBorde),
                   pw.SizedBox(height: 4),
                   pw.Text('Aceptación de Saldo (Cliente)', style: pw.TextStyle(fontSize: 8.5, color: textoSecundario)),
+                  pw.Text(clienteNombre, style: pw.TextStyle(fontSize: 8.5, font: fontBold, color: textoOscuro)),
+                  if (cedulaFinal.isNotEmpty)
+                    pw.Text('C.C. / NIT: $cedulaFinal', style: pw.TextStyle(fontSize: 7.5, color: textoSecundario)),
                 ],
               ),
             ],
@@ -620,6 +810,19 @@ class PdfService {
     required List<ServicioModel> serviciosPendientes,
   }) async {
     final pdf = pw.Document();
+    final pilotoFirmante = await _obtenerPilotoFirmante();
+
+    // Cargar mapa de cédulas de clientes desde Firestore
+    final Map<String, String> cedulasPorNombre = {};
+    try {
+      final snap = await FirebaseFirestore.instance.collection('clientes').get();
+      for (final d in snap.docs) {
+        final c = ClienteModel.fromMap(d.id, d.data());
+        if (c.cedula.isNotEmpty) {
+          cedulasPorNombre[c.nombre.trim().toLowerCase()] = c.cedula;
+        }
+      }
+    } catch (_) {}
 
     final fontBold = await PdfGoogleFonts.interBold();
     final fontRegular = await PdfGoogleFonts.interRegular();
@@ -703,11 +906,15 @@ class PdfService {
             border: pw.TableBorder.all(color: grisBorde, width: 0.5),
             headerStyle: pw.TextStyle(font: fontBold, fontSize: 9, color: PdfColors.white),
             headerDecoration: const pw.BoxDecoration(color: naranjaAlerta),
-            cellStyle: const pw.TextStyle(fontSize: 8.5),
-            headers: ['Cliente', 'Teléfono', 'Ubicación / Finca', 'Cultivo', 'Facturado', 'Abonado', 'Saldo'],
+            cellStyle: const pw.TextStyle(fontSize: 8),
+            headers: ['Cliente', 'C.C. / NIT', 'Teléfono', 'Ubicación / Finca', 'Cultivo', 'Facturado', 'Abonado', 'Saldo'],
             data: serviciosPendientes.map((s) {
+              final cedula = s.clienteCedula.isNotEmpty
+                  ? s.clienteCedula
+                  : (cedulasPorNombre[s.clienteNombre.trim().toLowerCase()] ?? '-');
               return [
                 s.clienteNombre,
+                cedula,
                 s.clienteTelefono,
                 s.fincaUbicacion,
                 s.cultivo,
@@ -716,6 +923,22 @@ class PdfService {
                 _currencyFormat.format(s.saldoPendiente),
               ];
             }).toList(),
+          ),
+          pw.SizedBox(height: 28),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.end,
+            children: [
+              _buildFirmaOperadorWidget(
+                piloto: pilotoFirmante,
+                tituloRol: 'Firma Autorizada Control de Cartera',
+                subtituloNombreFallback: 'Administración Ícaro Proagro',
+                fontBold: fontBold,
+                fontRegular: fontRegular,
+                grisBorde: grisBorde,
+                textoOscuro: textoOscuro,
+                textoSecundario: textoSecundario,
+              ),
+            ],
           ),
         ],
         footer: (context) => pw.Row(
@@ -764,6 +987,16 @@ class PdfService {
   /// Genera bytes en memoria del comprobante / orden de servicio individual
   static Future<Uint8List> generarOrdenServicio(ServicioModel s) async {
     final pdf = pw.Document();
+
+    final pilotoFirmante = await _obtenerPilotoFirmante(s.piloto);
+    final infoCliente = await _obtenerClienteInfo(
+      clienteId: s.clienteId,
+      clienteNombre: s.clienteNombre,
+    );
+    final String cedulaCliente = s.clienteCedula.trim().isNotEmpty
+        ? s.clienteCedula.trim()
+        : (infoCliente?.cedula ?? '');
+    final double saldoAFavorCliente = infoCliente?.saldoAFavor ?? 0.0;
 
     final fontBold = await PdfGoogleFonts.interBold();
     final fontRegular = await PdfGoogleFonts.interRegular();
@@ -839,6 +1072,8 @@ class PdfService {
                           pw.Text('INFORMACIÓN DEL CLIENTE', style: pw.TextStyle(font: fontBold, fontSize: 10, color: verdeOscuro)),
                           pw.SizedBox(height: 6),
                           pw.Text('Cliente: ${s.clienteNombre}', style: pw.TextStyle(font: fontMedium, fontSize: 9.5)),
+                          if (cedulaCliente.isNotEmpty)
+                            pw.Text('Cédula / NIT: $cedulaCliente', style: pw.TextStyle(font: fontMedium, fontSize: 9, color: textoOscuro)),
                           pw.Text('Finca / Ubicación: ${s.fincaUbicacion}', style: pw.TextStyle(fontSize: 9)),
                           pw.Text('Teléfono: ${s.clienteTelefono}', style: pw.TextStyle(fontSize: 9)),
                         ],
@@ -850,9 +1085,9 @@ class PdfService {
                         children: [
                           pw.Text('EQUIPO Y TRIPULACIÓN', style: pw.TextStyle(font: fontBold, fontSize: 10, color: verdeOscuro)),
                           pw.SizedBox(height: 6),
-                          pw.Text('Piloto a Cargo: ${s.piloto.isNotEmpty ? s.piloto : "No especificado"}', style: pw.TextStyle(font: fontMedium, fontSize: 9.5)),
+                          pw.Text('Piloto a Cargo: ${s.piloto.isNotEmpty ? s.piloto : (pilotoFirmante?.nombre ?? "No especificado")}', style: pw.TextStyle(font: fontMedium, fontSize: 9.5)),
                           pw.Text('Aeronave / Dron: ${s.dron.isNotEmpty ? s.dron : "DJI Agras"}', style: pw.TextStyle(fontSize: 9)),
-                          pw.Text('Método de Pago: ${s.metodoPago == "EN_LINEA" ? "Transferencia / En Línea" : "Efectivo"}', style: pw.TextStyle(fontSize: 9)),
+                          pw.Text('Método de Pago: ${TransaccionModel.nombreMetodo(s.metodoPago)}', style: pw.TextStyle(fontSize: 9)),
                         ],
                       ),
                     ),
@@ -891,7 +1126,7 @@ class PdfService {
                 mainAxisAlignment: pw.MainAxisAlignment.end,
                 children: [
                   pw.Container(
-                    width: 240,
+                    width: 255,
                     padding: const pw.EdgeInsets.all(10),
                     decoration: pw.BoxDecoration(
                       color: grisFondo,
@@ -923,6 +1158,16 @@ class PdfService {
                             pw.Text(_currencyFormat.format(s.saldoPendiente), style: pw.TextStyle(font: fontBold, fontSize: 10, color: s.saldoPendiente > 0 ? PdfColors.orange800 : verdePrimario)),
                           ],
                         ),
+                        if (saldoAFavorCliente > 0) ...[
+                          pw.SizedBox(height: 4),
+                          pw.Row(
+                            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                            children: [
+                              pw.Text('SALDO A FAVOR (ANTICIPO):', style: pw.TextStyle(font: fontBold, fontSize: 8.5, color: const PdfColor.fromInt(0xFF0284C7))),
+                              pw.Text('+ ${_currencyFormat.format(saldoAFavorCliente)}', style: pw.TextStyle(font: fontBold, fontSize: 9.5, color: const PdfColor.fromInt(0xFF0284C7))),
+                            ],
+                          ),
+                        ],
                         pw.Divider(color: grisBorde, height: 10),
                         pw.Row(
                           mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -958,28 +1203,33 @@ class PdfService {
                 ),
               ],
 
-              pw.Spacer(),
+              pw.SizedBox(height: 35),
 
               // FIRMAS
               pw.Row(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
                 children: [
-                  pw.Column(
-                    crossAxisAlignment: pw.CrossAxisAlignment.center,
-                    children: [
-                      pw.Container(width: 170, height: 1, color: grisBorde),
-                      pw.SizedBox(height: 4),
-                      pw.Text('Firma Piloto / Operador Certificado', style: pw.TextStyle(fontSize: 8.5, font: fontRegular, color: textoSecundario)),
-                      pw.Text(s.piloto.isNotEmpty ? s.piloto : 'Tripulación Icaro Proagro', style: pw.TextStyle(fontSize: 8, font: fontBold, color: textoOscuro)),
-                    ],
+                  _buildFirmaOperadorWidget(
+                    piloto: pilotoFirmante,
+                    tituloRol: 'Firma Piloto / Operador Certificado',
+                    subtituloNombreFallback: s.piloto.isNotEmpty ? s.piloto : 'Tripulación Icaro Proagro',
+                    fontBold: fontBold,
+                    fontRegular: fontRegular,
+                    grisBorde: grisBorde,
+                    textoOscuro: textoOscuro,
+                    textoSecundario: textoSecundario,
                   ),
                   pw.Column(
                     crossAxisAlignment: pw.CrossAxisAlignment.center,
                     children: [
+                      pw.SizedBox(height: 36),
                       pw.Container(width: 170, height: 1, color: grisBorde),
                       pw.SizedBox(height: 4),
                       pw.Text('Recibido a Conformidad por Cliente', style: pw.TextStyle(fontSize: 8.5, font: fontRegular, color: textoSecundario)),
-                      pw.Text(s.clienteNombre, style: pw.TextStyle(fontSize: 8, font: fontBold, color: textoOscuro)),
+                      pw.Text(s.clienteNombre, style: pw.TextStyle(fontSize: 8.5, font: fontBold, color: textoOscuro)),
+                      if (cedulaCliente.isNotEmpty)
+                        pw.Text('C.C. / NIT: $cedulaCliente', style: pw.TextStyle(fontSize: 7.5, font: fontRegular, color: textoSecundario)),
                     ],
                   ),
                 ],
@@ -1018,6 +1268,7 @@ class PdfService {
     ServicioModel? servicio,
   }) async {
     final pdf = pw.Document();
+    final pilotoFirmante = await _obtenerPilotoFirmante(dano.pilotoReporta);
 
     final fontBold = await PdfGoogleFonts.interBold();
     final fontRegular = await PdfGoogleFonts.interRegular();
@@ -1342,19 +1593,22 @@ class PdfService {
           // SECCIÓN 5: FIRMAS DE RESPONSABILIDAD
           pw.Row(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.end,
             children: [
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  pw.Container(width: 170, height: 1, color: grisBorde),
-                  pw.SizedBox(height: 6),
-                  pw.Text('Firma del Piloto / Operador', style: pw.TextStyle(fontSize: 8, font: fontMedium, color: textoSecundario)),
-                  pw.Text(dano.pilotoReporta, style: pw.TextStyle(fontSize: 8.5, font: fontBold, color: textoOscuro)),
-                ],
+              _buildFirmaOperadorWidget(
+                piloto: pilotoFirmante,
+                tituloRol: 'Firma del Piloto / Operador',
+                subtituloNombreFallback: dano.pilotoReporta,
+                fontBold: fontBold,
+                fontRegular: fontRegular,
+                grisBorde: grisBorde,
+                textoOscuro: textoOscuro,
+                textoSecundario: textoSecundario,
               ),
               pw.Column(
                 crossAxisAlignment: pw.CrossAxisAlignment.center,
                 children: [
+                  pw.SizedBox(height: 36),
                   pw.Container(width: 170, height: 1, color: grisBorde),
                   pw.SizedBox(height: 6),
                   pw.Text('Firma Mantenimiento / Aprobación', style: pw.TextStyle(fontSize: 8, font: fontMedium, color: textoSecundario)),
@@ -1390,6 +1644,212 @@ class PdfService {
     await Printing.layoutPdf(
       onLayout: (PdfPageFormat format) async => bytes,
       name: 'Ficha_Tecnica_Dano_${dano.categoriaEquipo}_$nombreLimpio.pdf',
+    );
+  }
+
+  /// Genera y comparte el Reporte Fotográfico de Evolución y Progreso del Predio
+  static Future<void> generarYCompartirProgresoPredioPdf({
+    required String clienteNombre,
+    String clienteCedula = '',
+    required String fincaUbicacion,
+    required List<ProgresoPredioModel> registros,
+  }) async {
+    final pdf = pw.Document();
+    final pilotoRef = registros.where((r) => r.piloto.isNotEmpty).firstOrNull?.piloto;
+    final pilotoFirmante = await _obtenerPilotoFirmante(pilotoRef);
+    final infoCliente = await _obtenerClienteInfo(
+      clienteId: registros.firstOrNull?.clienteId,
+      clienteNombre: clienteNombre,
+    );
+    final cedulaFinal = clienteCedula.isNotEmpty
+        ? clienteCedula
+        : (registros.where((r) => r.clienteCedula.isNotEmpty).firstOrNull?.clienteCedula ??
+            infoCliente?.cedula ??
+            '');
+
+    final fontBold = await PdfGoogleFonts.interBold();
+    final fontRegular = await PdfGoogleFonts.interRegular();
+    final fontMedium = await PdfGoogleFonts.interMedium();
+
+    const verdePrimario = PdfColor.fromInt(0xFF059669);
+    const verdeOscuro = PdfColor.fromInt(0xFF02371E);
+    const grisFondo = PdfColor.fromInt(0xFFF8FAFC);
+    const grisBorde = PdfColor.fromInt(0xFFCBD5E1);
+    const textoOscuro = PdfColor.fromInt(0xFF0F172A);
+    const textoSecundario = PdfColor.fromInt(0xFF475569);
+
+    final now = DateTime.now();
+
+    pdf.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(32),
+        theme: pw.ThemeData.withFont(base: fontRegular, bold: fontBold),
+        header: (context) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('ICARO PROAGRO', style: pw.TextStyle(font: fontBold, fontSize: 22, color: verdePrimario)),
+                    pw.Text('Informe Agronómico y Progreso Fotográfico de Predios', style: pw.TextStyle(font: fontRegular, fontSize: 9.5, color: textoSecundario)),
+                  ],
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: pw.BoxDecoration(
+                    color: grisFondo,
+                    borderRadius: pw.BorderRadius.circular(8),
+                    border: pw.Border.all(color: grisBorde),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text('EVOLUCIÓN DE PREDIO', style: pw.TextStyle(font: fontBold, fontSize: 10, color: verdeOscuro)),
+                      pw.Text('Emisión: ${DateFormat('dd/MM/yyyy').format(now)}', style: pw.TextStyle(fontSize: 8.5, color: textoSecundario)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 6),
+            pw.Container(height: 2, color: verdePrimario),
+            pw.SizedBox(height: 12),
+          ],
+        ),
+        build: (context) => [
+          pw.Container(
+            padding: const pw.EdgeInsets.all(12),
+            decoration: pw.BoxDecoration(
+              color: grisFondo,
+              borderRadius: pw.BorderRadius.circular(8),
+              border: pw.Border.all(color: grisBorde),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Column(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text('CLIENTE: $clienteNombre', style: pw.TextStyle(font: fontBold, fontSize: 11.5, color: textoOscuro)),
+                    if (cedulaFinal.isNotEmpty)
+                      pw.Text('Cédula / NIT: $cedulaFinal', style: pw.TextStyle(font: fontMedium, fontSize: 9, color: textoOscuro)),
+                    pw.Text('Predio / Ubicación: $fincaUbicacion', style: pw.TextStyle(fontSize: 9, color: textoSecundario)),
+                  ],
+                ),
+                pw.Text('Visitas / Registros: ${registros.length}', style: pw.TextStyle(font: fontBold, fontSize: 9.5, color: verdePrimario)),
+              ],
+            ),
+          ),
+          pw.SizedBox(height: 14),
+          ...registros.map((r) {
+            final List<Uint8List> imgs = [];
+            for (final b64 in r.fotosBase64) {
+              try {
+                final bytes = base64Decode(b64);
+                if (bytes.isNotEmpty) imgs.add(bytes);
+              } catch (_) {}
+            }
+            return pw.Container(
+              margin: const pw.EdgeInsets.only(bottom: 14),
+              padding: const pw.EdgeInsets.all(10),
+              decoration: pw.BoxDecoration(
+                color: PdfColors.white,
+                borderRadius: pw.BorderRadius.circular(8),
+                border: pw.Border.all(color: grisBorde),
+              ),
+              child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Row(
+                    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                    children: [
+                      pw.Text(
+                        '${r.etapaLabel.toUpperCase()} • ${r.cultivo.isNotEmpty ? r.cultivo : "Lote Principal"}',
+                        style: pw.TextStyle(font: fontBold, fontSize: 10, color: verdeOscuro),
+                      ),
+                      pw.Text(
+                        DateFormat('dd/MM/yyyy hh:mm a').format(r.fecha),
+                        style: pw.TextStyle(fontSize: 8.5, color: textoSecundario),
+                      ),
+                    ],
+                  ),
+                  if (r.observaciones.isNotEmpty) ...[
+                    pw.SizedBox(height: 5),
+                    pw.Text(r.observaciones, style: pw.TextStyle(fontSize: 9, color: textoOscuro)),
+                  ],
+                  if (imgs.isNotEmpty) ...[
+                    pw.SizedBox(height: 8),
+                    pw.Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: imgs.take(4).map((b) {
+                        return pw.Container(
+                          width: 225,
+                          height: 115,
+                          decoration: pw.BoxDecoration(
+                            borderRadius: pw.BorderRadius.circular(6),
+                            border: pw.Border.all(color: grisBorde),
+                          ),
+                          child: pw.ClipRRect(
+                            horizontalRadius: 6,
+                            verticalRadius: 6,
+                            child: pw.Image(pw.MemoryImage(b), fit: pw.BoxFit.cover),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          }),
+          pw.SizedBox(height: 20),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.end,
+            children: [
+              _buildFirmaOperadorWidget(
+                piloto: pilotoFirmante,
+                tituloRol: 'Firma Piloto / Operador Técnico',
+                subtituloNombreFallback: 'Operaciones Ícaro Proagro',
+                fontBold: fontBold,
+                fontRegular: fontRegular,
+                grisBorde: grisBorde,
+                textoOscuro: textoOscuro,
+                textoSecundario: textoSecundario,
+              ),
+              pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
+                children: [
+                  pw.SizedBox(height: 36),
+                  pw.Container(width: 170, height: 1, color: grisBorde),
+                  pw.SizedBox(height: 4),
+                  pw.Text('Recibido por Propietario / Cliente', style: pw.TextStyle(fontSize: 8.5, color: textoSecundario)),
+                  pw.Text(clienteNombre, style: pw.TextStyle(fontSize: 8.5, font: fontBold, color: textoOscuro)),
+                  if (cedulaFinal.isNotEmpty)
+                    pw.Text('C.C. / NIT: $cedulaFinal', style: pw.TextStyle(fontSize: 7.5, color: textoSecundario)),
+                ],
+              ),
+            ],
+          ),
+        ],
+        footer: (context) => pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text('Icaro Proagro • Seguimiento Fotográfico de Predios', style: pw.TextStyle(fontSize: 7.5, color: textoSecundario)),
+            pw.Text('Página ${context.pageNumber} de ${context.pagesCount}', style: pw.TextStyle(fontSize: 7.5, color: textoSecundario)),
+          ],
+        ),
+      ),
+    );
+
+    await Printing.layoutPdf(
+      onLayout: (PdfPageFormat format) async => pdf.save(),
+      name: 'Progreso_Predio_${clienteNombre.replaceAll(" ", "_")}.pdf',
     );
   }
 }

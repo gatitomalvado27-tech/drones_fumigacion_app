@@ -5,10 +5,13 @@ import 'package:url_launcher/url_launcher.dart';
 import '../theme/agro_theme.dart';
 import '../models/cliente_model.dart';
 import '../models/servicio_model.dart';
+import '../models/transaccion_model.dart';
 import '../utils/crop_helper.dart';
 import '../utils/operaciones_helper.dart';
 import '../services/pdf_service.dart';
 import '../services/notification_service.dart';
+import '../services/contabilidad_auto_service.dart';
+import '../widgets/progreso_predio_dialog.dart';
 import 'servicios_screen.dart';
 
 class AgendaScreen extends StatefulWidget {
@@ -269,9 +272,10 @@ class _AgendaScreenState extends State<AgendaScreen> {
 
                         if (_busqueda.isNotEmpty) {
                           final matchNombre = c.nombre.toLowerCase().contains(_busqueda);
+                          final matchCedula = c.cedula.toLowerCase().contains(_busqueda);
                           final matchUbicacion = c.ubicacion.toLowerCase().contains(_busqueda);
                           final matchTelefono = c.telefono.toLowerCase().contains(_busqueda);
-                          return matchNombre || matchUbicacion || matchTelefono;
+                          return matchNombre || matchCedula || matchUbicacion || matchTelefono;
                         }
                         return true;
                       }).toList();
@@ -400,7 +404,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
-                              cliente.nombre,
+                              '${cliente.nombre}${cliente.cedula.isNotEmpty ? " • C.C./NIT: ${cliente.cedula}" : ""}',
                               style: TextStyle(fontSize: 13, color: onSurfaceVariant),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -411,13 +415,22 @@ class _AgendaScreenState extends State<AgendaScreen> {
                   ),
                 ),
 
-                // MENÚ DE OPCIONES RÁPIDAS (EDITAR / ELIMINAR)
+                // MENÚ DE OPCIONES RÁPIDAS (EDITAR / PROGRESO / ELIMINAR)
                 PopupMenuButton<String>(
                   icon: Icon(Icons.more_vert, color: onSurfaceVariant, size: 20),
                   color: cardBg,
                   onSelected: (val) {
                     if (val == 'editar') {
                       _mostrarDialogoEditarCliente(context, cliente);
+                    } else if (val == 'progreso') {
+                      ProgresoPredioDialog.mostrar(
+                        context,
+                        clienteId: cliente.id ?? '',
+                        clienteNombre: cliente.nombre,
+                        clienteCedula: cliente.cedula,
+                        fincaUbicacion: cliente.ubicacion,
+                        cultivoInicial: cliente.cultivoPrincipal ?? (cultivos.isNotEmpty ? cultivos.first : 'Arroz'),
+                      );
                     } else if (val == 'eliminar') {
                       _confirmarEliminarCliente(context, cliente);
                     }
@@ -429,7 +442,17 @@ class _AgendaScreenState extends State<AgendaScreen> {
                         children: [
                           Icon(Icons.edit, size: 18, color: primary),
                           const SizedBox(width: 8),
-                          const Text('Editar Cliente'),
+                          const Text('Editar Cliente / Cédula'),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuItem(
+                      value: 'progreso',
+                      child: Row(
+                        children: [
+                          Icon(Icons.photo_camera_back_outlined, size: 18, color: Color(0xFF00897B)),
+                          SizedBox(width: 8),
+                          Text('Fotos de Progreso del Predio'),
                         ],
                       ),
                     ),
@@ -469,6 +492,40 @@ class _AgendaScreenState extends State<AgendaScreen> {
                 ],
               ),
             ),
+
+            // BANNER DE SALDO A FAVOR (ANTICIPO PARA FUTUROS VUELOS)
+            if (cliente.saldoAFavor > 0) ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                decoration: BoxDecoration(
+                  color: Colors.teal.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.teal.withValues(alpha: 0.5)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.account_balance_wallet, size: 20, color: Colors.teal),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            '💳 Saldo a Favor Disponible (Anticipo)',
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.teal),
+                          ),
+                          Text(
+                            'Disponible para futuras programaciones: ${_currencyFormat.format(cliente.saldoAFavor)}',
+                            style: TextStyle(fontSize: 11, color: onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
 
             // MINI AVISO / CUENTA REGRESIVA DEUDORES
             if (totalDeuda > 0) ...[
@@ -553,6 +610,13 @@ class _AgendaScreenState extends State<AgendaScreen> {
                     Icons.money_off,
                     (maxDiasMora >= 7 ? AgroTheme.error : Colors.amber[800]!).withValues(alpha: 0.15),
                     maxDiasMora >= 7 ? AgroTheme.error : Colors.amber[800]!,
+                  ),
+                if (cliente.saldoAFavor > 0)
+                  _buildTag(
+                    'A favor: ${_currencyFormat.format(cliente.saldoAFavor)}',
+                    Icons.account_balance_wallet,
+                    Colors.teal.withValues(alpha: 0.15),
+                    Colors.teal,
                   ),
                 if (cultivos.isNotEmpty)
                   for (var c in cultivos.take(3))
@@ -651,6 +715,18 @@ class _AgendaScreenState extends State<AgendaScreen> {
                   icon: const Icon(Icons.chat, color: Color(0xFF25D366)),
                   onPressed: () => _abrirWhatsAppCliente(cliente.telefono, cliente.nombre),
                 ),
+                IconButton(
+                  tooltip: 'Fotos de Progreso del Predio',
+                  icon: const Icon(Icons.photo_camera_back_outlined, color: Color(0xFF00897B)),
+                  onPressed: () => ProgresoPredioDialog.mostrar(
+                    context,
+                    clienteId: cliente.id ?? '',
+                    clienteNombre: cliente.nombre,
+                    clienteCedula: cliente.cedula,
+                    fincaUbicacion: cliente.ubicacion,
+                    cultivoInicial: cliente.cultivoPrincipal ?? (cultivos.isNotEmpty ? cultivos.first : 'Arroz'),
+                  ),
+                ),
                 const SizedBox(width: 4),
                 Expanded(
                   child: OutlinedButton.icon(
@@ -676,7 +752,9 @@ class _AgendaScreenState extends State<AgendaScreen> {
                   onPressed: () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (_) => const ServiciosScreen()),
+                      MaterialPageRoute(
+                        builder: (_) => ServiciosScreen(clientePreseleccionado: cliente),
+                      ),
                     );
                   },
                 ),
@@ -854,6 +932,13 @@ class _AgendaScreenState extends State<AgendaScreen> {
                                 color: onSurface,
                               ),
                             ),
+                            if (cliente.cedula.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                '🪪 C.C. / NIT: ${cliente.cedula}',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: primary),
+                              ),
+                            ],
                             const SizedBox(height: 4),
                             Text(
                               '📍 ${cliente.ubicacion}',
@@ -865,6 +950,14 @@ class _AgendaScreenState extends State<AgendaScreen> {
                             ),
                           ],
                         ),
+                      ),
+                      IconButton(
+                        tooltip: 'Editar Cliente / Cédula',
+                        icon: Icon(Icons.edit_outlined, color: primary),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _mostrarDialogoEditarCliente(context, cliente);
+                        },
                       ),
                       IconButton(
                         icon: const Icon(Icons.close),
@@ -917,12 +1010,181 @@ class _AgendaScreenState extends State<AgendaScreen> {
                             Navigator.pop(ctx);
                             Navigator.push(
                               context,
-                              MaterialPageRoute(builder: (_) => const ServiciosScreen()),
+                              MaterialPageRoute(
+                                builder: (_) => ServiciosScreen(clientePreseleccionado: cliente),
+                              ),
                             );
                           },
                         ),
                       ),
                     ],
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Segunda fila de acciones 360: Progreso Fotográfico del Predio y Estado de Cuenta PDF
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF00897B),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          icon: const Icon(Icons.photo_camera_back_outlined, size: 18),
+                          label: const Text('Progreso del Predio', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                          onPressed: () {
+                            ProgresoPredioDialog.mostrar(
+                              context,
+                              clienteId: cliente.id ?? '',
+                              clienteNombre: cliente.nombre,
+                              clienteCedula: cliente.cedula,
+                              fincaUbicacion: cliente.ubicacion,
+                              cultivoInicial: cliente.cultivoPrincipal ??
+                                  (conteoCultivos.isNotEmpty ? conteoCultivos.keys.first : 'Arroz'),
+                            );
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.redAccent,
+                            side: const BorderSide(color: Colors.redAccent),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                          icon: const Icon(Icons.picture_as_pdf, size: 18),
+                          label: const Text('Estado Cuenta PDF', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                          onPressed: () {
+                            final serviciosConSaldo = servicios
+                                .where((s) => s.estado != 'CANCELADO' && !s.pagado && s.saldoPendiente > 0)
+                                .toList();
+                            final listaParaPdf = serviciosConSaldo.isNotEmpty ? serviciosConSaldo : serviciosOrdenados;
+                            if (listaParaPdf.isEmpty) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Este cliente aún no tiene servicios para generar estado de cuenta.')),
+                              );
+                              return;
+                            }
+                            PdfService.generarYCompartirEstadoCuentaCliente(
+                              clienteNombre: cliente.nombre,
+                              clienteCedula: cliente.cedula,
+                              fincaUbicacion: cliente.ubicacion,
+                              clienteTelefono: cliente.telefono,
+                              serviciosCliente: listaParaPdf,
+                              saldoAFavorCliente: cliente.saldoAFavor,
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 16),
+
+                  // TARJETA DE SALDO A FAVOR Y ANTICIPOS PARA FUTURAS PROGRAMACIONES
+                  StreamBuilder<DocumentSnapshot>(
+                    stream: cliente.id != null
+                        ? FirebaseFirestore.instance.collection('clientes').doc(cliente.id).snapshots()
+                        : null,
+                    builder: (context, snapCliente) {
+                      double saldoFavorVivo = cliente.saldoAFavor;
+                      if (snapCliente.hasData && snapCliente.data != null && snapCliente.data!.exists) {
+                        final data = snapCliente.data!.data() as Map<String, dynamic>?;
+                        if (data != null) {
+                          saldoFavorVivo = (data['saldoAFavor'] ?? 0.0).toDouble();
+                        }
+                      }
+
+                      final vuelosPendientesDePago = serviciosOrdenados
+                          .where((s) => s.estado != 'CANCELADO' && !s.pagado && s.saldoPendiente > 0)
+                          .toList();
+
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.teal.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.teal.withValues(alpha: 0.45), width: 1.5),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.account_balance_wallet, color: Colors.teal, size: 22),
+                                    const SizedBox(width: 8),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const Text(
+                                          'Saldo a Favor (Anticipos)',
+                                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.teal),
+                                        ),
+                                        Text(
+                                          'Para futuras programaciones o abonos',
+                                          style: TextStyle(fontSize: 10.5, color: onSurfaceVariant),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                                Text(
+                                  _currencyFormat.format(saldoFavorVivo),
+                                  style: const TextStyle(
+                                    fontSize: 19,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.teal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Colors.teal,
+                                      side: const BorderSide(color: Colors.teal),
+                                      visualDensity: VisualDensity.compact,
+                                    ),
+                                    icon: const Icon(Icons.add_card, size: 16),
+                                    label: const Text('Abonar Anticipo', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                                    onPressed: () => _mostrarDialogoRegistrarAnticipo(context, cliente),
+                                  ),
+                                ),
+                                if (saldoFavorVivo > 0 && vuelosPendientesDePago.isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.teal,
+                                        foregroundColor: Colors.white,
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                      icon: const Icon(Icons.price_check, size: 16),
+                                      label: const Text('Aplicar a Vuelo', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                                      onPressed: () => _mostrarDialogoAplicarSaldoAVuelo(
+                                        context,
+                                        cliente: cliente,
+                                        saldoAFavorDisponible: saldoFavorVivo,
+                                        vuelosPendientes: vuelosPendientesDePago,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
                   ),
 
                   const Divider(height: 28),
@@ -1147,12 +1409,41 @@ class _AgendaScreenState extends State<AgendaScreen> {
                               Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
-                                    _currencyFormat.format(s.precioTotal),
-                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green.shade800),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        _currencyFormat.format(s.precioTotal),
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.green.shade800),
+                                      ),
+                                      if (!s.pagado && s.totalAbonado > 0)
+                                        Text(
+                                          'Abonado: ${_currencyFormat.format(s.totalAbonado)} | Resta: ${_currencyFormat.format(s.saldoPendiente)}',
+                                          style: const TextStyle(fontSize: 10.5, color: Colors.orange, fontWeight: FontWeight.w600),
+                                        )
+                                      else if (s.pagado)
+                                        const Text(
+                                          '✓ Pagado',
+                                          style: TextStyle(fontSize: 10.5, color: Colors.green, fontWeight: FontWeight.bold),
+                                        ),
+                                    ],
                                   ),
                                   Row(
                                     children: [
+                                      IconButton(
+                                        icon: const Icon(Icons.photo_camera_back_outlined, size: 18, color: Color(0xFF00897B)),
+                                        tooltip: 'Fotos de Progreso de este Vuelo',
+                                        onPressed: () => ProgresoPredioDialog.mostrar(
+                                          context,
+                                          clienteId: cliente.id ?? s.clienteId,
+                                          clienteNombre: cliente.nombre,
+                                          clienteCedula: cliente.cedula.isNotEmpty ? cliente.cedula : s.clienteCedula,
+                                          fincaUbicacion: s.fincaUbicacion,
+                                          cultivoInicial: s.cultivo,
+                                          servicioId: s.id,
+                                          pilotoInicial: s.piloto,
+                                        ),
+                                      ),
                                       IconButton(
                                         icon: const Icon(Icons.chat, size: 18, color: Color(0xFF25D366)),
                                         tooltip: 'Enviar Resumen WhatsApp',
@@ -1180,6 +1471,226 @@ class _AgendaScreenState extends State<AgendaScreen> {
           },
         );
       },
+    );
+  }
+
+  void _mostrarDialogoRegistrarAnticipo(BuildContext context, ClienteModel cliente) {
+    final formKey = GlobalKey<FormState>();
+    double monto = 0;
+    String metodoPago = 'EFECTIVO';
+    String notas = '';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.account_balance_wallet, color: Colors.teal),
+              SizedBox(width: 8),
+              Expanded(child: Text('Registrar Anticipo / Saldo a Favor', style: TextStyle(fontSize: 16))),
+            ],
+          ),
+          content: Form(
+            key: formKey,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Cliente: ${cliente.nombre}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 12),
+                  TextFormField(
+                    decoration: const InputDecoration(
+                      labelText: 'Monto del Anticipo (\$ COP)',
+                      prefixIcon: Icon(Icons.attach_money),
+                      border: OutlineInputBorder(),
+                    ),
+                    keyboardType: TextInputType.number,
+                    validator: (v) {
+                      final n = double.tryParse(v ?? '');
+                      if (n == null || n <= 0) return 'Ingresa un monto válido';
+                      return null;
+                    },
+                    onSaved: (v) => monto = double.parse(v!),
+                  ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    initialValue: metodoPago,
+                    decoration: const InputDecoration(
+                      labelText: 'Entró a cuenta / método',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: TransaccionModel.metodosPagoMap.entries
+                        .map((e) => DropdownMenuItem(value: e.key, child: Text(e.value, style: const TextStyle(fontSize: 13))))
+                        .toList(),
+                    onChanged: (v) => setDialogState(() => metodoPago = v ?? 'EFECTIVO'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    decoration: const InputDecoration(
+                      labelText: 'Concepto / Observación (Opcional)',
+                      hintText: 'Ej. Abono para fumigación de próximo lote',
+                      border: OutlineInputBorder(),
+                    ),
+                    onSaved: (v) => notas = v?.trim() ?? '',
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+              icon: const Icon(Icons.check, size: 18),
+              label: const Text('Guardar Anticipo'),
+              onPressed: () async {
+                if (formKey.currentState!.validate()) {
+                  formKey.currentState!.save();
+                  await ContabilidadAutoService.sumarSaldoAFavorCliente(
+                    clienteId: cliente.id ?? '',
+                    clienteNombre: cliente.nombre,
+                    clienteCedula: cliente.cedula,
+                    clienteTelefono: cliente.telefono,
+                    fincaUbicacion: cliente.ubicacion,
+                    cultivo: cliente.cultivoPrincipal ?? 'Arroz',
+                    montoExcedente: monto,
+                  );
+                  await FirebaseFirestore.instance.collection('transacciones').add(
+                    TransaccionModel(
+                      tipo: 'INGRESO',
+                      categoria: 'ANTICIPO_CLIENTE',
+                      monto: monto,
+                      metodoPago: metodoPago,
+                      fecha: DateTime.now(),
+                      clienteNombre: cliente.nombre,
+                      descripcion: 'Anticipo / Saldo a favor de ${cliente.nombre} (${cliente.ubicacion})'
+                          '${notas.isNotEmpty ? " - $notas" : ""}',
+                    ).toMap(),
+                  );
+                  if (ctx.mounted) {
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('¡Anticipo de ${_currencyFormat.format(monto)} sumado al Saldo a Favor de ${cliente.nombre}!'),
+                        backgroundColor: Colors.teal,
+                      ),
+                    );
+                  }
+                }
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _mostrarDialogoAplicarSaldoAVuelo(
+    BuildContext context, {
+    required ClienteModel cliente,
+    required double saldoAFavorDisponible,
+    required List<ServicioModel> vuelosPendientes,
+  }) {
+    ServicioModel vueloSeleccionado = vuelosPendientes.first;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final double pendienteVuelo = vueloSeleccionado.saldoPendiente;
+          final double montoAAplicar = saldoAFavorDisponible >= pendienteVuelo ? pendienteVuelo : saldoAFavorDisponible;
+
+          return AlertDialog(
+            title: const Text('Aplicar Saldo a Favor a Vuelo', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Saldo disponible: ${_currencyFormat.format(saldoAFavorDisponible)}',
+                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.teal),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: vueloSeleccionado.id,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Selecciona el vuelo a abonar',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: vuelosPendientes.map((v) {
+                    final f = DateFormat('dd/MM/yy').format(v.fecha);
+                    return DropdownMenuItem<String>(
+                      value: v.id,
+                      child: Text(
+                        '$f • ${v.cultivo} (${v.hectareas} Ha) - Debe: ${_currencyFormat.format(v.saldoPendiente)}',
+                        style: const TextStyle(fontSize: 12),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (id) {
+                    if (id != null) {
+                      setDialogState(() {
+                        vueloSeleccionado = vuelosPendientes.firstWhere((v) => v.id == id);
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.teal.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    'Se descontarán ${_currencyFormat.format(montoAAplicar)} de su Saldo a Favor y se aplicarán a este vuelo. '
+                    '${montoAAplicar >= pendienteVuelo - 1 ? "¡El vuelo quedará 100% PAGADO!" : "Restará por pagar: ${_currencyFormat.format(pendienteVuelo - montoAAplicar)}"}',
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+                onPressed: () async {
+                  if (vueloSeleccionado.id == null) return;
+                  final nuevoAbonado = vueloSeleccionado.totalAbonado + montoAAplicar;
+                  final quedaPagado = nuevoAbonado >= (vueloSeleccionado.precioTotal - 1.0);
+
+                  await FirebaseFirestore.instance.collection('servicios').doc(vueloSeleccionado.id).update({
+                    'totalAbonado': quedaPagado ? vueloSeleccionado.precioTotal : nuevoAbonado,
+                    'pagado': quedaPagado,
+                    if (quedaPagado) 'fechaPago': Timestamp.now(),
+                  });
+
+                  await ContabilidadAutoService.descontarSaldoAFavorCliente(
+                    clienteId: cliente.id ?? '',
+                    clienteNombre: cliente.nombre,
+                    montoAAplicar: montoAAplicar,
+                  );
+
+                  if (ctx.mounted) {
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('¡Se aplicaron ${_currencyFormat.format(montoAAplicar)} del Saldo a Favor al vuelo!'),
+                        backgroundColor: Colors.teal,
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Aplicar Ahora'),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
@@ -1221,6 +1732,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
   void _mostrarDialogoNuevoCliente(BuildContext context) {
     final formKey = GlobalKey<FormState>();
     String nombre = '';
+    String cedula = '';
     String telefono = '';
     String ubicacion = '';
     String cultivoPrincipal = CropHelper.cultivos.first;
@@ -1238,22 +1750,40 @@ class _AgendaScreenState extends State<AgendaScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   TextFormField(
-                    decoration: const InputDecoration(labelText: 'Nombre del Agricultor / Empresa'),
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre del Agricultor / Empresa',
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
                     validator: (v) => v!.isEmpty ? 'Requerido' : null,
-                    onSaved: (v) => nombre = v!,
+                    onSaved: (v) => nombre = v!.trim(),
                   ),
                   const SizedBox(height: 10),
                   TextFormField(
-                    decoration: const InputDecoration(labelText: 'Teléfono / WhatsApp'),
+                    decoration: const InputDecoration(
+                      labelText: 'Cédula / NIT',
+                      prefixIcon: Icon(Icons.badge_outlined),
+                    ),
+                    keyboardType: TextInputType.text,
+                    onSaved: (v) => cedula = v?.trim() ?? '',
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    decoration: const InputDecoration(
+                      labelText: 'Teléfono / WhatsApp',
+                      prefixIcon: Icon(Icons.phone_outlined),
+                    ),
                     keyboardType: TextInputType.phone,
                     validator: (v) => v!.isEmpty ? 'Requerido' : null,
-                    onSaved: (v) => telefono = v!,
+                    onSaved: (v) => telefono = v!.trim(),
                   ),
                   const SizedBox(height: 10),
                   TextFormField(
-                    decoration: const InputDecoration(labelText: 'Nombre de la Finca / Municipio'),
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre de la Finca / Municipio',
+                      prefixIcon: Icon(Icons.location_on_outlined),
+                    ),
                     validator: (v) => v!.isEmpty ? 'Requerido' : null,
-                    onSaved: (v) => ubicacion = v!,
+                    onSaved: (v) => ubicacion = v!.trim(),
                   ),
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
@@ -1277,10 +1807,12 @@ class _AgendaScreenState extends State<AgendaScreen> {
                   formKey.currentState!.save();
                   await FirebaseFirestore.instance.collection('clientes').add({
                     'nombre': nombre,
+                    'cedula': cedula,
                     'telefono': telefono,
                     'ubicacion': ubicacion,
                     'cultivoPrincipal': cultivoPrincipal,
                     'activo': true,
+                    'saldoAFavor': 0.0,
                   });
                   if (ctx.mounted) Navigator.pop(ctx);
                 }
@@ -1296,6 +1828,7 @@ class _AgendaScreenState extends State<AgendaScreen> {
   void _mostrarDialogoEditarCliente(BuildContext context, ClienteModel cliente) {
     final formKey = GlobalKey<FormState>();
     String nombre = cliente.nombre;
+    String cedula = cliente.cedula;
     String telefono = cliente.telefono;
     String ubicacion = cliente.ubicacion;
     String cultivoPrincipal = cliente.cultivoPrincipal ?? CropHelper.cultivos.first;
@@ -1317,24 +1850,43 @@ class _AgendaScreenState extends State<AgendaScreen> {
                 children: [
                   TextFormField(
                     initialValue: nombre,
-                    decoration: const InputDecoration(labelText: 'Nombre del Agricultor / Empresa'),
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre del Agricultor / Empresa',
+                      prefixIcon: Icon(Icons.person_outline),
+                    ),
                     validator: (v) => v!.isEmpty ? 'Requerido' : null,
-                    onSaved: (v) => nombre = v!,
+                    onSaved: (v) => nombre = v!.trim(),
+                  ),
+                  const SizedBox(height: 10),
+                  TextFormField(
+                    initialValue: cedula,
+                    decoration: const InputDecoration(
+                      labelText: 'Cédula / NIT',
+                      prefixIcon: Icon(Icons.badge_outlined),
+                    ),
+                    keyboardType: TextInputType.text,
+                    onSaved: (v) => cedula = v?.trim() ?? '',
                   ),
                   const SizedBox(height: 10),
                   TextFormField(
                     initialValue: telefono,
-                    decoration: const InputDecoration(labelText: 'Teléfono / WhatsApp'),
+                    decoration: const InputDecoration(
+                      labelText: 'Teléfono / WhatsApp',
+                      prefixIcon: Icon(Icons.phone_outlined),
+                    ),
                     keyboardType: TextInputType.phone,
                     validator: (v) => v!.isEmpty ? 'Requerido' : null,
-                    onSaved: (v) => telefono = v!,
+                    onSaved: (v) => telefono = v!.trim(),
                   ),
                   const SizedBox(height: 10),
                   TextFormField(
                     initialValue: ubicacion,
-                    decoration: const InputDecoration(labelText: 'Nombre de la Finca / Municipio'),
+                    decoration: const InputDecoration(
+                      labelText: 'Nombre de la Finca / Municipio',
+                      prefixIcon: Icon(Icons.location_on_outlined),
+                    ),
                     validator: (v) => v!.isEmpty ? 'Requerido' : null,
-                    onSaved: (v) => ubicacion = v!,
+                    onSaved: (v) => ubicacion = v!.trim(),
                   ),
                   const SizedBox(height: 10),
                   DropdownButtonFormField<String>(
@@ -1359,10 +1911,19 @@ class _AgendaScreenState extends State<AgendaScreen> {
                   if (cliente.id != null) {
                     await FirebaseFirestore.instance.collection('clientes').doc(cliente.id).update({
                       'nombre': nombre,
+                      'cedula': cedula,
                       'telefono': telefono,
                       'ubicacion': ubicacion,
                       'cultivoPrincipal': cultivoPrincipal,
                     });
+                    // Sincronizar cédula en servicios asociados a este cliente para que sus PDFs la reflejen siempre
+                    final snapServicios = await FirebaseFirestore.instance
+                        .collection('servicios')
+                        .where('clienteId', isEqualTo: cliente.id)
+                        .get();
+                    for (final doc in snapServicios.docs) {
+                      await doc.reference.update({'clienteCedula': cedula});
+                    }
                   }
                   if (ctx.mounted) {
                     Navigator.pop(ctx);

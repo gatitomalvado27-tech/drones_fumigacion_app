@@ -55,8 +55,9 @@ class ContabilidadAutoService {
       }
 
       if (s.pagado) {
-        // 2. PAGADO: registrar en caja lo que falte
-        final faltante = s.precioTotal - ingresado;
+        // 2. PAGADO: registrar en caja lo que falte (respetando abonos/anticipos ya aplicados)
+        final cubierto = ingresado > s.totalAbonado ? ingresado : s.totalAbonado;
+        final faltante = s.precioTotal - cubierto;
         if (faltante > 1.0) {
           await _db.collection('transacciones').add({
             'tipo': 'INGRESO',
@@ -90,6 +91,98 @@ class ContabilidadAutoService {
     } catch (e) {
       debugPrint('Error sincronizando contabilidad del servicio $id: $e');
     }
+  }
+
+  /// Incrementa (o ajusta) el Saldo a Favor de un cliente en la colección `clientes`.
+  /// Si el cliente aún no existe como documento en `clientes`, lo crea automáticamente.
+  static Future<void> sumarSaldoAFavorCliente({
+    required String clienteId,
+    required String clienteNombre,
+    String clienteCedula = '',
+    required String clienteTelefono,
+    required String fincaUbicacion,
+    required String cultivo,
+    required double montoExcedente,
+  }) async {
+    if (montoExcedente <= 0) return;
+    final col = _db.collection('clientes');
+
+    if (clienteId.isNotEmpty) {
+      final docRef = col.doc(clienteId);
+      final snap = await docRef.get();
+      if (snap.exists && snap.data() != null) {
+        final actual = ((snap.data()!['saldoAFavor'] ?? 0) as num).toDouble();
+        await docRef.update({
+          'saldoAFavor': actual + montoExcedente,
+          if (clienteCedula.isNotEmpty) 'cedula': clienteCedula,
+        });
+        return;
+      }
+    }
+
+    // Buscar por nombre exacto (case-insensitive)
+    final allSnap = await col.get();
+    final busq = clienteNombre.trim().toLowerCase();
+    for (final d in allSnap.docs) {
+      final nom = (d.data()['nombre'] ?? '').toString().trim().toLowerCase();
+      if (nom == busq) {
+        final actual = ((d.data()['saldoAFavor'] ?? 0) as num).toDouble();
+        await d.reference.update({
+          'saldoAFavor': actual + montoExcedente,
+          if (clienteCedula.isNotEmpty && (d.data()['cedula'] ?? '').toString().isEmpty)
+            'cedula': clienteCedula,
+        });
+        return;
+      }
+    }
+
+    // Si no existía en `clientes`, crearlo con el saldo a favor
+    await col.add({
+      'nombre': clienteNombre.trim(),
+      'cedula': clienteCedula.trim(),
+      'telefono': clienteTelefono.trim(),
+      'ubicacion': fincaUbicacion.trim(),
+      'cultivoPrincipal': cultivo.trim(),
+      'activo': true,
+      'saldoAFavor': montoExcedente,
+    });
+  }
+
+  /// Descuenta saldo a favor del cliente cuando se aplica a una nueva programación o servicio existente.
+  static Future<double> descontarSaldoAFavorCliente({
+    required String clienteId,
+    required String clienteNombre,
+    required double montoAAplicar,
+  }) async {
+    if (montoAAplicar <= 0) return 0.0;
+    final col = _db.collection('clientes');
+
+    DocumentSnapshot<Map<String, dynamic>>? targetDoc;
+    if (clienteId.isNotEmpty) {
+      final snap = await col.doc(clienteId).get();
+      if (snap.exists) targetDoc = snap;
+    }
+
+    if (targetDoc == null) {
+      final allSnap = await col.get();
+      final busq = clienteNombre.trim().toLowerCase();
+      for (final d in allSnap.docs) {
+        final nom = (d.data()['nombre'] ?? '').toString().trim().toLowerCase();
+        if (nom == busq) {
+          targetDoc = d;
+          break;
+        }
+      }
+    }
+
+    if (targetDoc == null || targetDoc.data() == null) return 0.0;
+    final disponible = ((targetDoc.data()!['saldoAFavor'] ?? 0) as num).toDouble();
+    if (disponible <= 0) return 0.0;
+
+    final aplicado = montoAAplicar > disponible ? disponible : montoAAplicar;
+    final restante = (disponible - aplicado).clamp(0.0, double.infinity);
+    await targetDoc.reference.update({'saldoAFavor': restante});
+    return aplicado;
   }
 
   /// Cambia el estado de un vuelo y aplica automáticamente sus efectos contables
