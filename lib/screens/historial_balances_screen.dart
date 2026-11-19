@@ -5,6 +5,7 @@ import '../models/cierre_mensual_model.dart';
 import '../models/transaccion_model.dart';
 import '../models/servicio_model.dart';
 import '../services/pdf_service.dart';
+import '../services/balance_mensual_auto_service.dart';
 import '../theme/agro_theme.dart';
 
 class HistorialBalancesScreen extends StatefulWidget {
@@ -25,6 +26,14 @@ class _HistorialBalancesScreenState extends State<HistorialBalancesScreen> {
     '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
     'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      BalanceMensualAutoService.verificarYGenerarBalancesAutomaticos();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -106,9 +115,32 @@ class _HistorialBalancesScreenState extends State<HistorialBalancesScreen> {
 
             return ListView.builder(
               padding: const EdgeInsets.all(20),
-              itemCount: cierres.length,
+              itemCount: cierres.length + 1,
               itemBuilder: (context, index) {
-                final c = cierres[index];
+                if (index == 0) {
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 14),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: primary.withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.auto_awesome_rounded, color: primary, size: 18),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'Los balances mensuales se generan automáticamente al finalizar cada mes.',
+                            style: TextStyle(fontSize: 12, color: text, fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+                final c = cierres[index - 1];
                 final nombreMes = (c.mes >= 1 && c.mes <= 12) ? mesesNombres[c.mes] : 'Mes ${c.mes}';
                 final tituloMes = '$nombreMes ${c.anio}'.toUpperCase();
 

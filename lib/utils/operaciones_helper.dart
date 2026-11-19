@@ -22,6 +22,7 @@ class CalculoInsumosBaterias {
   /// Capacidad en litros del tanque del dron
   int get capacidadTanqueLitros {
     final d = dronModelo.toUpperCase();
+    if (d.contains('T55')) return 50;
     if (d.contains('T50')) return 50;
     if (d.contains('T40')) return 40;
     if (d.contains('T30')) return 30;
@@ -86,6 +87,7 @@ class _CalculadoraInsumosModalState extends State<CalculadoraInsumosModal> {
   double _dosisQuimicoPorHa = 1.0;
 
   final List<String> _dronesDisponibles = [
+    'DJI Agras T55',
     'DJI Agras T50',
     'DJI Agras T40',
     'DJI Agras T30',

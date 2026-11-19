@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../services/notification_service.dart';
+import '../services/balance_mensual_auto_service.dart';
 import 'dashboard_screen.dart';
 import 'agenda_screen.dart';
 import 'cronograma_screen.dart';
@@ -32,10 +33,11 @@ class _HomeScreenState extends State<HomeScreen> {
       const ContabilidadScreen(),
     ];
 
-    // Tras el primer frame: pedir permisos y sincronizar recordatorios de vuelos
+    // Tras el primer frame: pedir permisos, sincronizar recordatorios y generar balances mensuales cerrados
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await NotificationService.instance.solicitarPermisos();
       NotificationService.instance.iniciarSincronizacionRecordatorios();
+      BalanceMensualAutoService.verificarYGenerarBalancesAutomaticos();
     });
   }
 

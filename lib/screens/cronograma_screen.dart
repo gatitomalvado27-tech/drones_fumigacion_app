@@ -1739,11 +1739,11 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: DropdownButtonFormField<String>(
-                            initialValue: ['DJI Agras T50', 'DJI Agras T40', 'DJI Agras T30', 'DJI Agras T25', 'DJI Agras T10', 'XAG P100 Pro', 'Otro Dron'].contains(dron)
+                            initialValue: ['DJI Agras T55', 'DJI Agras T50', 'DJI Agras T40', 'DJI Agras T30', 'DJI Agras T25', 'DJI Agras T10', 'XAG P100 Pro', 'Otro Dron'].contains(dron)
                                 ? dron
                                 : 'DJI Agras T40',
                             decoration: const InputDecoration(labelText: 'Aeronave / Dron'),
-                            items: ['DJI Agras T50', 'DJI Agras T40', 'DJI Agras T30', 'DJI Agras T25', 'DJI Agras T10', 'XAG P100 Pro', 'Otro Dron']
+                            items: ['DJI Agras T55', 'DJI Agras T50', 'DJI Agras T40', 'DJI Agras T30', 'DJI Agras T25', 'DJI Agras T10', 'XAG P100 Pro', 'Otro Dron']
                                 .map((d) => DropdownMenuItem(value: d, child: Text(d, style: const TextStyle(fontSize: 12))))
                                 .toList(),
                             onChanged: (val) {

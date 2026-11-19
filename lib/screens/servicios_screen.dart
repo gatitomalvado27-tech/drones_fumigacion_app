@@ -456,10 +456,15 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
 
             const Divider(height: 18),
 
-            // Botones de acción rápida
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
+            // Botones de acción rápida (Wrap para evitar desbordamiento en cualquier pantalla)
+            SizedBox(
+              width: double.infinity,
+              child: Wrap(
+                alignment: WrapAlignment.spaceEvenly,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 2,
+                runSpacing: 2,
+                children: [
                 // Progreso Fotográfico del Predio
                 IconButton(
                   tooltip: 'Progreso Fotográfico del Predio',
@@ -573,6 +578,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   onPressed: () => _confirmarEliminarServicio(servicio),
                 ),
               ],
+            ),
             ),
           ],
         ),
@@ -830,6 +836,7 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
     String dron = servicioAEditar?.dron ?? 'DJI Agras T40';
 
     final dronesDisponibles = [
+      'DJI Agras T55',
       'DJI Agras T50',
       'DJI Agras T40',
       'DJI Agras T30',

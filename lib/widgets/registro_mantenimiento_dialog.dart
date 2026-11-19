@@ -52,7 +52,7 @@ class _RegistroMantenimientoDialogState extends State<RegistroMantenimientoDialo
   bool _guardando = false;
 
   static const Map<String, List<String>> _equiposSugeridos = {
-    'DRON': ['DJI Agras T50', 'DJI Agras T40', 'DJI Agras T30', 'DJI Agras T25', 'DJI Agras T20P', 'XAG P100 Pro'],
+    'DRON': ['DJI Agras T55', 'DJI Agras T50', 'DJI Agras T40', 'DJI Agras T30', 'DJI Agras T25', 'DJI Agras T20P', 'XAG P100 Pro'],
     'VEHICULO': ['Camioneta de Operaciones', 'Vehículo de Apoyo', 'Remolque'],
     'PLANTA_ELECTRICA': ['Generador DJI D12000iE', 'Planta Eléctrica Principal', 'Generador de Respaldo'],
     'ASPERSION': ['Sistema de Aspersión / Boquillas', 'Tanque de Mezcla', 'Bomba de Carga'],

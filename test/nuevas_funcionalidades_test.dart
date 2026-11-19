@@ -7,6 +7,7 @@ import 'package:drones_fumigacion_app/models/mantenimiento_equipo_model.dart';
 import 'package:drones_fumigacion_app/models/servicio_model.dart';
 import 'package:drones_fumigacion_app/models/transaccion_model.dart';
 import 'package:drones_fumigacion_app/services/agenda_validacion_service.dart';
+import 'package:drones_fumigacion_app/services/balance_mensual_auto_service.dart';
 import 'package:drones_fumigacion_app/theme/theme_controller.dart';
 
 void main() {
@@ -232,6 +233,63 @@ void main() {
       expect(ThemeController.instance.customPrimary.toARGB32(), const Color(0xFF6366F1).toARGB32());
       expect(ThemeController.instance.customSecondary.toARGB32(), const Color(0xFFFBBF24).toARGB32());
       expect(ThemeController.instance.customDark, isTrue);
+    });
+  });
+
+  group('Balances mensuales automáticos', () {
+    test('Detecta el mes recién finalizado y meses anteriores pendientes sin duplicar', () {
+      final ahora = DateTime(2026, 11, 1, 0, 5); // Recién inicia noviembre
+      final pendientes = BalanceMensualAutoService.calcularMesesFinalizadosPendientes(
+        ahora: ahora,
+        fechasConActividad: [
+          DateTime(2026, 8, 15),
+          DateTime(2026, 9, 10),
+          DateTime(2026, 11, 1), // Mes en curso: NO debe cerrarse aún
+        ],
+        cierresExistentes: {'2026-08'},
+      );
+
+      // Debe incluir septiembre (con actividad y sin cierre) y octubre (mes recién finalizado)
+      expect(pendientes, [(2026, 9), (2026, 10)]);
+    });
+
+    test('Consolida ingresos, egresos (incluyendo INTERESES) y utilidad neta del mes', () {
+      final cierre = BalanceMensualAutoService.construirCierreMensual(
+        anio: 2026,
+        mes: 10,
+        todasTrans: [
+          TransaccionModel(
+            tipo: 'INGRESO',
+            categoria: 'SERVICIO',
+            monto: 800000,
+            descripcion: 'Vuelo',
+            fecha: DateTime(2026, 10, 12),
+            metodoPago: 'BANCOLOMBIA',
+          ),
+          TransaccionModel(
+            tipo: 'EGRESO',
+            categoria: 'INTERESES',
+            monto: 50000,
+            descripcion: 'Intereses',
+            fecha: DateTime(2026, 10, 20),
+          ),
+          // Movimiento de otro mes no debe mezclarse
+          TransaccionModel(
+            tipo: 'INGRESO',
+            categoria: 'SERVICIO',
+            monto: 500000,
+            descripcion: 'Otro mes',
+            fecha: DateTime(2026, 11, 2),
+          ),
+        ],
+        todosServ: [],
+      );
+
+      expect(cierre.id, '2026-10');
+      expect(cierre.totalIngresos, 800000);
+      expect(cierre.totalEgresos, 50000);
+      expect(cierre.utilidadNeta, 750000);
+      expect(cierre.desgloseCategorias['INTERESES'], 50000);
     });
   });
 }

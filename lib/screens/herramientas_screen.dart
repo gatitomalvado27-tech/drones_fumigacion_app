@@ -129,6 +129,7 @@ class _CalculadoraCaldoTabState extends State<CalculadoraCaldoTab> {
   String _modeloDronSeleccionado = 'DJI Agras T40 (40L)';
 
   final Map<String, double> _presetsDrones = {
+    'DJI Agras T55 (50L)': 50.0,
     'DJI Agras T50 (40L)': 40.0,
     'DJI Agras T40 (40L)': 40.0,
     'DJI Agras T30 (30L)': 30.0,

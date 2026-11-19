@@ -12,6 +12,7 @@ import '../models/cliente_model.dart';
 import '../services/pdf_service.dart';
 import '../services/notification_service.dart';
 import '../services/contabilidad_auto_service.dart';
+import '../services/balance_mensual_auto_service.dart';
 import '../utils/crop_helper.dart';
 import 'historial_balances_screen.dart';
 
@@ -52,6 +53,9 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      BalanceMensualAutoService.verificarYGenerarBalancesAutomaticos();
+    });
   }
 
   @override
@@ -207,26 +211,18 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                   const SizedBox(width: 6),
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      side: BorderSide(color: primary.withValues(alpha: 0.8)),
-                      backgroundColor: primary.withValues(alpha: 0.1),
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 6),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                      side: BorderSide(color: primary.withValues(alpha: 0.5)),
+                      backgroundColor: primary.withValues(alpha: 0.08),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       minimumSize: Size.zero,
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                    icon: Icon(Icons.picture_as_pdf, size: 14, color: primary),
+                    icon: Icon(Icons.history_edu_rounded, size: 15, color: primary),
                     label: Text(
-                      'PDF',
-                      style: TextStyle(color: primary, fontSize: 11, fontWeight: FontWeight.bold),
+                      'Balances',
+                      style: TextStyle(color: primary, fontSize: 11.5, fontWeight: FontWeight.bold),
                     ),
-                    onPressed: () => _generarBalanceMensual(context),
-                  ),
-                  const SizedBox(width: 4),
-                  IconButton(
-                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                    padding: const EdgeInsets.all(6),
-                    tooltip: 'Historial de Balances',
-                    icon: Icon(Icons.history_edu, color: primary, size: 20),
                     onPressed: () {
                       Navigator.push(
                         context,
@@ -234,13 +230,39 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                       );
                     },
                   ),
-                  const SizedBox(width: 2),
-                  IconButton(
-                    constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-                    padding: const EdgeInsets.all(6),
-                    tooltip: 'Exportar a Excel / Sheets',
-                    icon: Icon(Icons.table_chart, color: primary, size: 20),
-                    onPressed: () => _mostrarDialogoExportarExcel(context),
+                  const SizedBox(width: 4),
+                  PopupMenuButton<String>(
+                    tooltip: 'Exportar reportes',
+                    icon: Icon(Icons.more_vert_rounded, color: onSurface, size: 22),
+                    onSelected: (val) {
+                      if (val == 'pdf') {
+                        _generarBalanceMensual(context);
+                      } else if (val == 'excel') {
+                        _mostrarDialogoExportarExcel(context);
+                      }
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'pdf',
+                        child: Row(
+                          children: [
+                            Icon(Icons.picture_as_pdf_outlined, size: 18),
+                            SizedBox(width: 8),
+                            Text('Generar Balance PDF'),
+                          ],
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'excel',
+                        child: Row(
+                          children: [
+                            Icon(Icons.table_chart_outlined, size: 18),
+                            SizedBox(width: 8),
+                            Text('Exportar a Excel / Sheets'),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -414,16 +436,18 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
 
             const SizedBox(height: 6),
 
-            // TAB BAR ESTILO STITCH
+            // TAB BAR PROFESIONAL
             Container(
               margin: const EdgeInsets.symmetric(horizontal: 20.0),
+              padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(12),
+                color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.45),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: borderColor.withValues(alpha: 0.35)),
               ),
               child: TabBar(
                 controller: _tabController,
-                labelColor: Colors.black,
+                labelColor: Theme.of(context).colorScheme.onPrimary,
                 unselectedLabelColor: onSurfaceVariant,
                 indicator: BoxDecoration(
                   color: primary,
@@ -1068,16 +1092,23 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
 
                   const SizedBox(height: 8),
 
-                  // HERO CARD 1: PATRIMONIO REAL DE LA EMPRESA
+                  // HERO CARD 1: PATRIMONIO REAL DE LA EMPRESA (Diseño ejecutivo limpio)
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: cardBg,
-                      borderRadius: BorderRadius.circular(20),
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [
+                          Color.alphaBlend(primary.withValues(alpha: 0.14), cardBg),
+                          cardBg,
+                        ],
+                      ),
+                      borderRadius: BorderRadius.circular(22),
                       border: Border.all(
-                        color: primary.withValues(alpha: 0.7),
-                        width: 1.5,
+                        color: primary.withValues(alpha: 0.35),
+                        width: 1.0,
                       ),
                       boxShadow: AgroTheme.getShadow(context),
                     ),
@@ -1089,104 +1120,124 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                           children: [
                             Row(
                               children: [
-                                Icon(Icons.account_balance, color: primary, size: 20),
-                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.all(7),
+                                  decoration: BoxDecoration(
+                                    color: primary.withValues(alpha: 0.16),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Icon(Icons.account_balance_outlined, color: primary, size: 18),
+                                ),
+                                const SizedBox(width: 10),
                                 Text(
                                   'PATRIMONIO REAL',
                                   style: TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 1.2,
-                                    color: primary,
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    letterSpacing: 1.1,
+                                    color: onSurfaceVariant,
                                   ),
                                 ),
                               ],
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: primary.withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(12),
+                                color: primary.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(20),
                               ),
                               child: Text(
-                                'Caja + Por Cobrar',
-                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: primary),
+                                '${totalHa.toStringAsFixed(1)} Ha',
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: primary),
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 16),
                         Text(
                           _currencyFormat.format(patrimonioReal),
                           style: TextStyle(
                             fontSize: 34,
                             fontWeight: FontWeight.w900,
                             color: onSurface,
-                            letterSpacing: -0.5,
+                            letterSpacing: -0.8,
                           ),
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 4),
                         Text(
-                          'Valor neto operacional • ${totalHa.toStringAsFixed(1)} Ha voladas acumuladas',
+                          'Caja líquida disponible + cuentas por cobrar',
                           style: TextStyle(fontSize: 12, color: onSurfaceVariant),
                         ),
-                        const Divider(height: 24),
+                        const SizedBox(height: 16),
                         Row(
                           children: [
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 8,
-                                        height: 8,
-                                        decoration: BoxDecoration(color: primary, shape: BoxShape.circle),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text('Caja Disponible', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    _currencyFormat.format(cajaLiquidaReal),
-                                    style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: cajaLiquidaReal >= 0 ? primary : AgroTheme.error,
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: 7,
+                                          height: 7,
+                                          decoration: BoxDecoration(color: primary, shape: BoxShape.circle),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text('Caja Disponible', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                                      ],
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      _currencyFormat.format(cajaLiquidaReal),
+                                      style: TextStyle(
+                                        fontSize: 15.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: cajaLiquidaReal >= 0 ? primary : AgroTheme.getError(context),
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                            Container(width: 1, height: 32, color: borderColor),
-                            const SizedBox(width: 14),
+                            const SizedBox(width: 10),
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 8,
-                                        height: 8,
-                                        decoration: const BoxDecoration(color: Colors.orangeAccent, shape: BoxShape.circle),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text('Por Cobrar', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    _currencyFormat.format(totalPorCobrar),
-                                    style: const TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: Colors.orangeAccent,
+                              child: Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(context).colorScheme.surfaceContainerHighest.withValues(alpha: 0.35),
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Container(
+                                          width: 7,
+                                          height: 7,
+                                          decoration: const BoxDecoration(color: Colors.orangeAccent, shape: BoxShape.circle),
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text('Por Cobrar', style: TextStyle(fontSize: 11, color: onSurfaceVariant)),
+                                      ],
                                     ),
-                                  ),
-                                ],
+                                    const SizedBox(height: 5),
+                                    Text(
+                                      _currencyFormat.format(totalPorCobrar),
+                                      style: const TextStyle(
+                                        fontSize: 15.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.orangeAccent,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
@@ -1195,9 +1246,9 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                     ),
                   ),
 
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 16),
 
-                  // HERO CARD: MÉTRICAS DE RENTABILIDAD NETA
+                  // HERO CARD 2: MÉTRICAS DE RENTABILIDAD NETA (Minimalista y clara)
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(18),
@@ -1205,8 +1256,8 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                       color: cardBg,
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(
-                        color: (margenNeto >= 0 ? Colors.green : Colors.red).withValues(alpha: 0.6),
-                        width: 1.5,
+                        color: borderColor.withValues(alpha: 0.55),
+                        width: 1.0,
                       ),
                       boxShadow: AgroTheme.getShadow(context),
                     ),
@@ -1607,8 +1658,8 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
                       color: cardBg,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: AgroTheme.error.withValues(alpha: 0.35)),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: borderColor.withValues(alpha: 0.55)),
                       boxShadow: AgroTheme.getShadow(context),
                     ),
                     child: Column(
