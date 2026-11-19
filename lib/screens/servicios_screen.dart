@@ -14,6 +14,9 @@ import '../services/pdf_service.dart';
 import '../widgets/registro_cobro_servicio_dialog.dart';
 import '../widgets/progreso_predio_dialog.dart';
 import '../services/contabilidad_auto_service.dart';
+import '../services/agenda_validacion_service.dart';
+import '../widgets/reprogramar_vuelo_dialog.dart';
+import '../widgets/registro_parametros_vuelo_dialog.dart';
 
 class ServiciosScreen extends StatefulWidget {
   final DateTime? fechaInicial;
@@ -515,10 +518,24 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                   ],
                 ),
 
+                // Parámetros de Aplicación
+                IconButton(
+                  tooltip: 'Parámetros de Aplicación',
+                  icon: Icon(Icons.tune_rounded, color: Theme.of(context).colorScheme.primary),
+                  onPressed: () => RegistroParametrosVueloDialog.mostrar(context, servicio: servicio),
+                ),
+
+                // Reprogramar vuelo
+                IconButton(
+                  tooltip: 'Reprogramar Vuelo',
+                  icon: const Icon(Icons.event_repeat_rounded, color: Colors.orange),
+                  onPressed: () => ReprogramarVueloDialog.mostrar(context, servicio),
+                ),
+
                 // Editar servicio programado
                 IconButton(
                   tooltip: 'Editar Vuelo Programado',
-                  icon: const Icon(Icons.edit, color: Color(0xFF2E7D32)),
+                  icon: Icon(Icons.edit, color: Theme.of(context).colorScheme.primary),
                   onPressed: () => _mostrarDialogoAgendarServicio(context, servicioAEditar: servicio),
                 ),
 
@@ -1522,6 +1539,73 @@ class _ServiciosScreenState extends State<ServiciosScreen> {
                                 horaSeleccionada.hour,
                                 horaSeleccionada.minute,
                               );
+
+                              // Validar días no laborables y mantenimientos activos del equipo
+                              final validacion = await AgendaValidacionService.validarEnFirestore(
+                                fechaHoraVuelo: fechaHora,
+                                dronAsignado: dron,
+                              );
+                              if (validacion.tieneAdvertencias && context.mounted) {
+                                final continuar = await showDialog<bool>(
+                                  context: context,
+                                  builder: (warnCtx) => AlertDialog(
+                                    title: const Row(
+                                      children: [
+                                        Icon(Icons.warning_amber_rounded, color: Colors.amber, size: 24),
+                                        SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                            'Advertencia de Programación',
+                                            style: TextStyle(fontSize: 16),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    content: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        if (validacion.diaNoLaborable != null) ...[
+                                          Text(
+                                            '• Fecha bloqueada como día no laborable: ${validacion.diaNoLaborable!.motivo}',
+                                            style: const TextStyle(fontWeight: FontWeight.bold),
+                                          ),
+                                          if (validacion.diaNoLaborable!.descripcion.isNotEmpty)
+                                            Text('  ${validacion.diaNoLaborable!.descripcion}'),
+                                          const SizedBox(height: 8),
+                                        ],
+                                        if (validacion.mantenimientosConflicto.isNotEmpty) ...[
+                                          const Text(
+                                            '• Conflicto con mantenimiento de equipo:',
+                                            style: TextStyle(fontWeight: FontWeight.bold),
+                                          ),
+                                          for (final m in validacion.mantenimientosConflicto)
+                                            Text(
+                                              '  - ${m.nombreEquipo} (${m.tipoMantenimiento}: ${DateFormat('dd/MM HH:mm').format(m.fechaInicio)} - ${DateFormat('dd/MM HH:mm').format(m.fechaFin)})',
+                                            ),
+                                        ],
+                                        const SizedBox(height: 12),
+                                        const Text('¿Deseas agendar este vuelo de todas formas?'),
+                                      ],
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed: () => Navigator.pop(warnCtx, false),
+                                        child: const Text('Cancelar'),
+                                      ),
+                                      ElevatedButton(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: Colors.orange,
+                                          foregroundColor: Colors.white,
+                                        ),
+                                        onPressed: () => Navigator.pop(warnCtx, true),
+                                        child: const Text('Agendar igual'),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                                if (continuar != true) return;
+                              }
 
                               final double totalCalc = hectareas * precioPorHectarea;
                               double? abonoInicial = servicioAEditar?.totalAbonado;

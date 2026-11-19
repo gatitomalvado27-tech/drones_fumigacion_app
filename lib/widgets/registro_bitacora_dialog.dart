@@ -7,6 +7,7 @@ import '../theme/agro_theme.dart';
 import '../utils/crop_helper.dart';
 import 'registro_dano_equipo_dialog.dart';
 import 'registro_cobro_servicio_dialog.dart';
+import 'registro_parametros_vuelo_dialog.dart';
 
 class RegistroBitacoraDialog extends StatefulWidget {
   final ServicioModel servicio;
@@ -657,13 +658,22 @@ class _RegistroBitacoraDialogState extends State<RegistroBitacoraDialog> {
               ),
               child: Row(
                 children: [
-                  // Botón inteligente de no querer agregarlo
                   TextButton(
                     onPressed: _guardando ? null : () => Navigator.of(context).pop(false),
                     child: Text(
-                      'Omitir Bitácora',
+                      'Omitir',
                       style: TextStyle(color: subtext, fontWeight: FontWeight.bold),
                     ),
+                  ),
+                  IconButton(
+                    tooltip: 'Registrar parámetros de aplicación',
+                    icon: Icon(Icons.tune_rounded, color: primary, size: 20),
+                    onPressed: _guardando
+                        ? null
+                        : () => RegistroParametrosVueloDialog.mostrar(
+                              context,
+                              servicio: widget.servicio,
+                            ),
                   ),
                   const Spacer(),
                   ElevatedButton.icon(

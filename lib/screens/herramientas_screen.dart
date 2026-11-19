@@ -34,13 +34,13 @@ class _HerramientasScreenState extends State<HerramientasScreen> with SingleTick
 
   @override
   Widget build(BuildContext context) {
-    const themeColor = Color(0xFF2E7D32);
+    final colorScheme = Theme.of(context).colorScheme;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Herramientas de Campo'),
-        backgroundColor: themeColor,
-        foregroundColor: Colors.white,
+        backgroundColor: colorScheme.surface,
+        foregroundColor: colorScheme.onSurface,
         actions: [
           IconButton(
             tooltip: 'Daños en Equipos',
@@ -80,10 +80,10 @@ class _HerramientasScreenState extends State<HerramientasScreen> with SingleTick
         ],
         bottom: TabBar(
           controller: _tabController,
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white70,
-          indicatorColor: Colors.amberAccent,
-          indicatorWeight: 3.5,
+          labelColor: colorScheme.primary,
+          unselectedLabelColor: colorScheme.onSurfaceVariant,
+          indicatorColor: colorScheme.primary,
+          indicatorWeight: 3.0,
           isScrollable: true,
           tabAlignment: TabAlignment.start,
           tabs: const [

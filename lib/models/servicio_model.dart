@@ -24,6 +24,10 @@ class ServicioModel {
   double totalAbonado;
   double? litrosAplicados;
   BitacoraVueloModel? bitacora;
+  bool reprogramado;
+  DateTime? fechaOriginal;
+  List<Map<String, dynamic>> historialReprogramaciones;
+  Map<String, dynamic>? parametrosAplicacion;
 
   ServicioModel({
     this.id,
@@ -49,7 +53,12 @@ class ServicioModel {
     double? totalAbonado,
     this.litrosAplicados,
     this.bitacora,
-  }) : totalAbonado = totalAbonado ?? (pagado ? precioTotal : 0.0);
+    this.reprogramado = false,
+    this.fechaOriginal,
+    List<Map<String, dynamic>>? historialReprogramaciones,
+    this.parametrosAplicacion,
+  })  : totalAbonado = totalAbonado ?? (pagado ? precioTotal : 0.0),
+        historialReprogramaciones = historialReprogramaciones ?? [];
 
   double get saldoPendiente {
     final saldo = precioTotal - totalAbonado;
@@ -92,6 +101,10 @@ class ServicioModel {
       'totalAbonado': totalAbonado,
       if (litrosAplicados != null) 'litrosAplicados': litrosAplicados,
       if (bitacora != null) 'bitacora': bitacora!.toMap(),
+      'reprogramado': reprogramado,
+      if (fechaOriginal != null) 'fechaOriginal': fechaOriginal!.toIso8601String(),
+      if (historialReprogramaciones.isNotEmpty) 'historialReprogramaciones': historialReprogramaciones,
+      if (parametrosAplicacion != null) 'parametrosAplicacion': parametrosAplicacion,
     };
   }
 
@@ -101,6 +114,11 @@ class ServicioModel {
     final totalAbonadoVal = map['totalAbonado'] != null
         ? (map['totalAbonado'] as num).toDouble()
         : (pagadoVal ? precioTotalVal : 0.0);
+
+    final rawHist = map['historialReprogramaciones'];
+    final List<Map<String, dynamic>> historial = rawHist is List
+        ? rawHist.map((e) => Map<String, dynamic>.from(e as Map)).toList()
+        : [];
 
     return ServicioModel(
       id: id,
@@ -129,6 +147,14 @@ class ServicioModel {
           : null,
       bitacora: map['bitacora'] != null
           ? BitacoraVueloModel.fromMap(null, Map<String, dynamic>.from(map['bitacora']))
+          : null,
+      reprogramado: map['reprogramado'] == true || historial.isNotEmpty,
+      fechaOriginal: map['fechaOriginal'] != null
+          ? DateTime.tryParse(map['fechaOriginal'].toString())
+          : null,
+      historialReprogramaciones: historial,
+      parametrosAplicacion: map['parametrosAplicacion'] is Map
+          ? Map<String, dynamic>.from(map['parametrosAplicacion'] as Map)
           : null,
     );
   }

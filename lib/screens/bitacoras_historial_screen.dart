@@ -9,6 +9,7 @@ import '../utils/crop_helper.dart';
 import '../widgets/registro_bitacora_dialog.dart';
 import 'bitacora_danos_screen.dart';
 import 'repuestos_vida_util_screen.dart';
+import 'parametros_vuelo_screen.dart';
 
 class BitacorasHistorialScreen extends StatefulWidget {
   const BitacorasHistorialScreen({super.key});
@@ -25,7 +26,7 @@ class _BitacorasHistorialScreenState extends State<BitacorasHistorialScreen> wit
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -99,6 +100,8 @@ class _BitacorasHistorialScreenState extends State<BitacorasHistorialScreen> wit
         surfaceTintColor: Colors.transparent,
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
           labelColor: primary,
           unselectedLabelColor: subtext,
           indicatorColor: primary,
@@ -106,8 +109,9 @@ class _BitacorasHistorialScreenState extends State<BitacorasHistorialScreen> wit
           labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
           tabs: const [
             Tab(icon: Icon(Icons.history_edu_rounded, size: 20), text: 'Vuelos y Campo'),
-            Tab(icon: Icon(Icons.car_crash_rounded, size: 20), text: 'Daños en Equipos'),
-            Tab(icon: Icon(Icons.build_circle_rounded, size: 20), text: 'Vida Útil Repuestos'),
+            Tab(icon: Icon(Icons.tune_rounded, size: 20), text: 'Parámetros'),
+            Tab(icon: Icon(Icons.car_crash_rounded, size: 20), text: 'Daños'),
+            Tab(icon: Icon(Icons.build_circle_rounded, size: 20), text: 'Repuestos'),
           ],
         ),
       ),
@@ -115,6 +119,7 @@ class _BitacorasHistorialScreenState extends State<BitacorasHistorialScreen> wit
         controller: _tabController,
         children: [
           _buildBitacorasVueloTab(cardBg, text, subtext, primary, border, isDark),
+          const ParametrosVueloScreen(comoWidget: true),
           const BitacoraDanosScreen(comoWidget: true),
           const RepuestosVidaUtilScreen(comoWidget: true),
         ],

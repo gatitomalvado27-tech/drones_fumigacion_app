@@ -5,7 +5,6 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'firebase_options.dart';
-import 'theme/agro_theme.dart';
 import 'theme/theme_controller.dart';
 import 'screens/home_screen.dart';
 import 'screens/pin_login_screen.dart';
@@ -49,11 +48,12 @@ class MyApp extends StatelessWidget {
     return ListenableBuilder(
       listenable: ThemeController.instance,
       builder: (context, _) {
+        final temaActual = ThemeController.instance.themeData;
         return MaterialApp(
           title: 'Icaro Proagro',
           debugShowCheckedModeBanner: false,
-          theme: AgroTheme.lightTheme,
-          darkTheme: AgroTheme.darkTheme,
+          theme: temaActual,
+          darkTheme: temaActual,
           themeMode: ThemeController.instance.themeMode,
           locale: const Locale('es', 'CO'),
           supportedLocales: const [

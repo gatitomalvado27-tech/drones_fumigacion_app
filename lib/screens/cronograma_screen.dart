@@ -9,7 +9,6 @@ import '../utils/crop_helper.dart';
 import '../utils/operaciones_helper.dart';
 import '../services/notification_service.dart';
 import '../utils/time_picker_helper.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'servicios_screen.dart';
 import '../widgets/gestion_pilotos_dialog.dart';
 import '../models/piloto_model.dart';
@@ -18,6 +17,13 @@ import '../widgets/registro_cobro_servicio_dialog.dart';
 import '../widgets/progreso_predio_dialog.dart';
 import '../services/contabilidad_auto_service.dart';
 import 'bitacoras_historial_screen.dart';
+import '../models/dia_no_laborable_model.dart';
+import '../models/mantenimiento_equipo_model.dart';
+import '../widgets/dia_no_laborable_dialog.dart';
+import '../widgets/registro_mantenimiento_dialog.dart';
+import '../widgets/reprogramar_vuelo_dialog.dart';
+import '../widgets/registro_parametros_vuelo_dialog.dart';
+import 'mantenimientos_equipos_screen.dart';
 
 class CronogramaScreen extends StatefulWidget {
   const CronogramaScreen({super.key});
@@ -29,6 +35,7 @@ class CronogramaScreen extends StatefulWidget {
 class _CronogramaScreenState extends State<CronogramaScreen> {
   DateTime _diaSeleccionado = DateTime.now();
   DateTime _focusedDay = DateTime.now();
+  String _vistaCalendario = 'MES'; // 'DIA', 'SEMANA', 'MES'
 
   @override
   Widget build(BuildContext context) {
@@ -44,458 +51,794 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
       body: SafeArea(
         child: StreamBuilder<QuerySnapshot>(
           stream: FirebaseFirestore.instance.collection('servicios').snapshots(),
-          builder: (context, snapshot) {
-            final docs = snapshot.data?.docs ?? [];
-            final todosServicios = docs.map((doc) {
+          builder: (context, snapshotServicios) {
+            final docsServicios = snapshotServicios.data?.docs ?? [];
+            final todosServicios = docsServicios.map((doc) {
               return ServicioModel.fromMap(doc.id, doc.data() as Map<String, dynamic>);
             }).toList();
 
-            // Mapeo de eventos por fecha (solo año, mes, día)
             final Map<DateTime, List<ServicioModel>> serviciosPorDia = {};
             for (var s in todosServicios) {
               final fechaSinHora = DateTime(s.fecha.year, s.fecha.month, s.fecha.day);
               serviciosPorDia.putIfAbsent(fechaSinHora, () => []).add(s);
             }
 
-            final fechaSeleccionadaSinHora = DateTime(_diaSeleccionado.year, _diaSeleccionado.month, _diaSeleccionado.day);
-            final serviciosDelDia = serviciosPorDia[fechaSeleccionadaSinHora] ?? [];
+            return StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance.collection('dias_no_laborables').snapshots(),
+              builder: (context, snapshotNoLab) {
+                final Map<DateTime, DiaNoLaborableModel> noLaborablesPorDia = {};
+                for (var doc in snapshotNoLab.data?.docs ?? []) {
+                  final d = DiaNoLaborableModel.fromMap(doc.id, doc.data() as Map<String, dynamic>);
+                  noLaborablesPorDia[DateTime(d.fecha.year, d.fecha.month, d.fecha.day)] = d;
+                }
 
-            return Column(
-              children: [
-                // HEADER DE CRONOGRAMA
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
-                  child: Row(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Container(
-                          width: 36,
-                          height: 36,
-                          decoration: BoxDecoration(
-                            color: cardBg,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: primary.withValues(alpha: 0.5)),
-                          ),
-                          child: Image.asset('assets/icon/app_icon.png', fit: BoxFit.cover),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Cronograma',
-                              style: TextStyle(
-                                fontSize: 19,
-                                fontWeight: FontWeight.bold,
-                                color: text,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              'Planificador de Vuelos',
-                              style: TextStyle(fontSize: 11, color: subtext),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      // BOTONES SUPERIORES (PILOTOS, DISPONIBILIDAD Y AGENDAR)
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: primary.withValues(alpha: 0.8)),
-                          backgroundColor: primary.withValues(alpha: 0.1),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        icon: Icon(Icons.badge_outlined, size: 14, color: primary),
-                        label: Text(
-                          'Pilotos',
-                          style: TextStyle(color: primary, fontSize: 11, fontWeight: FontWeight.bold),
-                        ),
-                        onPressed: () => GestionPilotosDialog.mostrar(context),
-                      ),
-                      const SizedBox(width: 6),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: Colors.teal.withValues(alpha: 0.8)),
-                          backgroundColor: Colors.teal.withValues(alpha: 0.1),
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        icon: const Icon(Icons.history_edu_rounded, size: 14, color: Colors.teal),
-                        label: const Text(
-                          'Bitácoras',
-                          style: TextStyle(color: Colors.teal, fontSize: 11, fontWeight: FontWeight.bold),
-                        ),
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const BitacorasHistorialScreen()),
-                          );
-                        },
-                      ),
-                      const SizedBox(width: 6),
-                      OutlinedButton.icon(
-                        style: OutlinedButton.styleFrom(
-                          side: BorderSide(color: primary.withValues(alpha: 0.8)),
-                          backgroundColor: primary.withValues(alpha: 0.1),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        ),
-                        icon: Icon(Icons.share, size: 14, color: primary),
-                        label: Text(
-                          'Disponibilidad',
-                          style: TextStyle(color: primary, fontSize: 11, fontWeight: FontWeight.bold),
-                        ),
-                        onPressed: () => _mostrarDialogoDisponibilidad(context, todosServicios),
-                      ),
-                    ],
-                  ),
-                ),
+                return StreamBuilder<QuerySnapshot>(
+                  stream: FirebaseFirestore.instance.collection('mantenimientos_equipos').snapshots(),
+                  builder: (context, snapshotMant) {
+                    final todosMantenimientos = (snapshotMant.data?.docs ?? [])
+                        .map((doc) => MantenimientoEquipoModel.fromMap(doc.id, doc.data() as Map<String, dynamic>))
+                        .toList();
 
-                // CALENDARIO MENSUAL COMPLETO
-                Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 4.0),
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: cardBg,
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: border.withValues(alpha: 0.5)),
-                    boxShadow: AgroTheme.getShadow(context),
-                  ),
-                  child: Column(
-                    children: [
-                      TableCalendar<ServicioModel>(
-                        firstDay: DateTime(2023, 1, 1),
-                        lastDay: DateTime(2030, 12, 31),
-                        focusedDay: _focusedDay,
-                        currentDay: DateTime.now(),
-                        calendarFormat: CalendarFormat.month,
-                        startingDayOfWeek: StartingDayOfWeek.monday,
-                        locale: 'es_CO',
-                        availableCalendarFormats: const {CalendarFormat.month: 'Mes'},
-                        headerStyle: HeaderStyle(
-                          formatButtonVisible: false,
-                          titleCentered: true,
-                          titleTextStyle: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.bold,
-                            color: text,
-                          ),
-                          leftChevronIcon: Icon(Icons.chevron_left, color: primary, size: 22),
-                          rightChevronIcon: Icon(Icons.chevron_right, color: primary, size: 22),
-                          headerPadding: const EdgeInsets.symmetric(vertical: 2),
-                        ),
-                        daysOfWeekStyle: DaysOfWeekStyle(
-                          weekdayStyle: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: subtext,
-                          ),
-                          weekendStyle: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: primary,
-                          ),
-                        ),
-                        calendarStyle: CalendarStyle(
-                          outsideDaysVisible: false,
-                          defaultTextStyle: TextStyle(color: text, fontSize: 13),
-                          weekendTextStyle: TextStyle(color: text, fontSize: 13),
-                          selectedDecoration: BoxDecoration(
-                            color: primary,
-                            borderRadius: BorderRadius.circular(10),
-                            boxShadow: [
-                              BoxShadow(
-                                color: primary.withValues(alpha: 0.4),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          selectedTextStyle: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 14,
-                          ),
-                          todayDecoration: BoxDecoration(
-                            border: Border.all(color: primary, width: 1.5),
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                          todayTextStyle: TextStyle(
-                            color: primary,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 13,
-                          ),
-                          markerDecoration: const BoxDecoration(
-                            color: Colors.transparent,
-                          ),
-                        ),
-                        selectedDayPredicate: (day) => isSameDay(_diaSeleccionado, day),
-                        onDaySelected: (selectedDay, focusedDay) {
-                          setState(() {
-                            _diaSeleccionado = selectedDay;
-                            _focusedDay = focusedDay;
-                          });
-                        },
-                        onPageChanged: (focusedDay) {
-                          _focusedDay = focusedDay;
-                        },
-                        calendarBuilders: CalendarBuilders(
-                          defaultBuilder: (context, day, focusedDay) {
-                            final dateKey = DateTime(day.year, day.month, day.day);
-                            final servicios = serviciosPorDia[dateKey];
-                            final bool tieneProgramacion = servicios != null && servicios.isNotEmpty;
-                            final coloresPilotos = _obtenerColoresPilotos(servicios, primary);
+                    final fechaSeleccionadaSinHora = DateTime(
+                      _diaSeleccionado.year,
+                      _diaSeleccionado.month,
+                      _diaSeleccionado.day,
+                    );
+                    final serviciosDelDia = [...(serviciosPorDia[fechaSeleccionadaSinHora] ?? [])]
+                      ..sort((a, b) => a.fecha.compareTo(b.fecha));
+                    final diaNoLaborableActual = noLaborablesPorDia[fechaSeleccionadaSinHora];
+                    final mantenimientosDelDia = todosMantenimientos
+                        .where((m) => m.cubreDia(fechaSeleccionadaSinHora))
+                        .toList()
+                      ..sort((a, b) => a.fechaInicio.compareTo(b.fechaInicio));
 
-                            if (tieneProgramacion) {
-                              final hayCancelados = servicios.every((s) => s.estado == 'CANCELADO');
-                              final Color bgTint = hayCancelados
-                                  ? AgroTheme.error.withValues(alpha: 0.15)
-                                  : primary.withValues(alpha: 0.18);
-                              final Color borderTint = hayCancelados
-                                  ? AgroTheme.error.withValues(alpha: 0.4)
-                                  : primary.withValues(alpha: 0.45);
+                    final hoySinHora = DateTime(
+                      DateTime.now().year,
+                      DateTime.now().month,
+                      DateTime.now().day,
+                    );
 
-                              return Container(
-                                margin: const EdgeInsets.all(3.0),
-                                alignment: Alignment.center,
-                                decoration: BoxDecoration(
-                                  color: bgTint,
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: borderTint, width: 1.2),
-                                ),
-                                child: _buildDayCellContent(
-                                  day.day,
-                                  coloresPilotos,
-                                  TextStyle(
-                                    color: text,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
+                    List<MantenimientoEquipoModel> mantenimientosEnFecha(DateTime d) {
+                      return todosMantenimientos.where((m) => m.cubreDia(d)).toList();
+                    }
+
+                    // CustomScrollView para desplazamiento libre, suave y natural de toda la pantalla
+                    return CustomScrollView(
+                      physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+                      slivers: [
+                        // 1. HEADER LIMPIO Y COMPACTO
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
+                            child: Row(
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    width: 36,
+                                    height: 36,
+                                    decoration: BoxDecoration(
+                                      color: cardBg,
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: primary.withValues(alpha: 0.5)),
+                                    ),
+                                    child: Image.asset('assets/icon/app_icon.png', fit: BoxFit.cover),
                                   ),
                                 ),
-                              );
-                            }
-                            return null;
-                          },
-                          todayBuilder: (context, day, focusedDay) {
-                            final dateKey = DateTime(day.year, day.month, day.day);
-                            final servicios = serviciosPorDia[dateKey];
-                            final bool tieneProgramacion = servicios != null && servicios.isNotEmpty;
-                            final coloresPilotos = _obtenerColoresPilotos(servicios, primary);
-
-                            return Container(
-                              margin: const EdgeInsets.all(3.0),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: tieneProgramacion ? primary.withValues(alpha: 0.22) : Colors.transparent,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: primary, width: 2.0),
-                              ),
-                              child: _buildDayCellContent(
-                                day.day,
-                                coloresPilotos,
-                                TextStyle(
-                                  color: primary,
-                                  fontWeight: FontWeight.w900,
-                                  fontSize: 13,
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Cronograma',
+                                        style: TextStyle(
+                                          fontSize: 19,
+                                          fontWeight: FontWeight.bold,
+                                          color: text,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      Text(
+                                        'Vuelos, mantenimientos y disponibilidad',
+                                        style: TextStyle(fontSize: 11, color: subtext),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                            );
-                          },
-                          selectedBuilder: (context, day, focusedDay) {
-                            final dateKey = DateTime(day.year, day.month, day.day);
-                            final servicios = serviciosPorDia[dateKey];
-                            final coloresPilotos = _obtenerColoresPilotos(servicios, Colors.white);
+                                IconButton(
+                                  tooltip: 'Pilotos',
+                                  icon: Icon(Icons.badge_outlined, color: primary, size: 21),
+                                  onPressed: () => GestionPilotosDialog.mostrar(context),
+                                ),
+                                IconButton(
+                                  tooltip: 'Compartir Disponibilidad',
+                                  icon: Icon(Icons.share_outlined, color: primary, size: 21),
+                                  onPressed: () => _mostrarDialogoDisponibilidad(context, todosServicios),
+                                ),
+                                PopupMenuButton<String>(
+                                  tooltip: 'Más opciones',
+                                  icon: Icon(Icons.more_vert, color: text, size: 21),
+                                  onSelected: (val) {
+                                    if (val == 'bitacoras') {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(builder: (_) => const BitacorasHistorialScreen()),
+                                      );
+                                    } else if (val == 'mantenimientos') {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(builder: (_) => const MantenimientosEquiposScreen()),
+                                      );
+                                    } else if (val == 'hoy') {
+                                      setState(() {
+                                        _diaSeleccionado = DateTime.now();
+                                        _focusedDay = DateTime.now();
+                                      });
+                                    }
+                                  },
+                                  itemBuilder: (_) => const [
+                                    PopupMenuItem(value: 'hoy', child: Text('Ir a hoy')),
+                                    PopupMenuItem(value: 'mantenimientos', child: Text('Historial de mantenimientos')),
+                                    PopupMenuItem(value: 'bitacoras', child: Text('Bitácoras y parámetros')),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
 
-                            return Container(
-                              margin: const EdgeInsets.all(3.0),
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: primary,
-                                borderRadius: BorderRadius.circular(10),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: primary.withValues(alpha: 0.4),
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 2),
+                        // 2. SELECTOR DE VISTA (MES / SEMANA / DÍA)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: SegmentedButton<String>(
+                                    segments: const [
+                                      ButtonSegment(value: 'MES', label: Text('Mes', style: TextStyle(fontSize: 12))),
+                                      ButtonSegment(value: 'SEMANA', label: Text('Semana', style: TextStyle(fontSize: 12))),
+                                      ButtonSegment(value: 'DIA', label: Text('Día', style: TextStyle(fontSize: 12))),
+                                    ],
+                                    selected: {_vistaCalendario},
+                                    onSelectionChanged: (sel) {
+                                      setState(() => _vistaCalendario = sel.first);
+                                    },
+                                    style: const ButtonStyle(
+                                      visualDensity: VisualDensity.compact,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        // 3. CALENDARIO (MES O SEMANA) O NAVEGADOR DIARIO
+                        SliverToBoxAdapter(
+                          child: _vistaCalendario == 'DIA'
+                              ? Container(
+                                  margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: cardBg,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: border.withValues(alpha: 0.5)),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      IconButton(
+                                        icon: Icon(Icons.chevron_left, color: primary),
+                                        onPressed: () {
+                                          setState(() {
+                                            _diaSeleccionado = _diaSeleccionado.subtract(const Duration(days: 1));
+                                            _focusedDay = _diaSeleccionado;
+                                          });
+                                        },
+                                      ),
+                                      Expanded(
+                                        child: InkWell(
+                                          onTap: () async {
+                                            final d = await showDatePicker(
+                                              context: context,
+                                              initialDate: _diaSeleccionado,
+                                              firstDate: DateTime(2023),
+                                              lastDate: DateTime(2030),
+                                            );
+                                            if (d != null) {
+                                              setState(() {
+                                                _diaSeleccionado = d;
+                                                _focusedDay = d;
+                                              });
+                                            }
+                                          },
+                                          child: Column(
+                                            children: [
+                                              Text(
+                                                DateFormat("EEEE d 'de' MMMM", 'es_CO').format(_diaSeleccionado),
+                                                textAlign: TextAlign.center,
+                                                style: TextStyle(
+                                                  fontSize: 15,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: text,
+                                                ),
+                                              ),
+                                              Text(
+                                                DateFormat('yyyy').format(_diaSeleccionado),
+                                                style: TextStyle(fontSize: 11.5, color: subtext),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: Icon(Icons.chevron_right, color: primary),
+                                        onPressed: () {
+                                          setState(() {
+                                            _diaSeleccionado = _diaSeleccionado.add(const Duration(days: 1));
+                                            _focusedDay = _diaSeleccionado;
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : Container(
+                                  margin: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 6.0),
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: cardBg,
+                                    borderRadius: BorderRadius.circular(20),
+                                    border: Border.all(color: border.withValues(alpha: 0.5)),
+                                    boxShadow: AgroTheme.getShadow(context),
+                                  ),
+                                  child: Column(
+                                    children: [
+                                      TableCalendar<ServicioModel>(
+                                        firstDay: DateTime(2023, 1, 1),
+                                        lastDay: DateTime(2030, 12, 31),
+                                        focusedDay: _focusedDay,
+                                        currentDay: DateTime.now(),
+                                        calendarFormat: _vistaCalendario == 'SEMANA'
+                                            ? CalendarFormat.week
+                                            : CalendarFormat.month,
+                                        // Permite que gestos verticales desplacen toda la pantalla sin bloqueo
+                                        availableGestures: AvailableGestures.horizontalSwipe,
+                                        startingDayOfWeek: StartingDayOfWeek.monday,
+                                        locale: 'es_CO',
+                                        availableCalendarFormats: const {
+                                          CalendarFormat.month: 'Mes',
+                                          CalendarFormat.week: 'Semana',
+                                        },
+                                        headerStyle: HeaderStyle(
+                                          formatButtonVisible: false,
+                                          titleCentered: true,
+                                          titleTextStyle: TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.bold,
+                                            color: text,
+                                          ),
+                                          leftChevronIcon: Icon(Icons.chevron_left, color: primary, size: 22),
+                                          rightChevronIcon: Icon(Icons.chevron_right, color: primary, size: 22),
+                                          headerPadding: const EdgeInsets.symmetric(vertical: 2),
+                                        ),
+                                        daysOfWeekStyle: DaysOfWeekStyle(
+                                          weekdayStyle: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: subtext,
+                                          ),
+                                          weekendStyle: TextStyle(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.bold,
+                                            color: primary,
+                                          ),
+                                        ),
+                                        calendarStyle: CalendarStyle(
+                                          outsideDaysVisible: false,
+                                          defaultTextStyle: TextStyle(color: text, fontSize: 13),
+                                          weekendTextStyle: TextStyle(color: text, fontSize: 13),
+                                          markerDecoration: const BoxDecoration(color: Colors.transparent),
+                                        ),
+                                        selectedDayPredicate: (day) => isSameDay(_diaSeleccionado, day),
+                                        onDaySelected: (selectedDay, focusedDay) {
+                                          setState(() {
+                                            _diaSeleccionado = selectedDay;
+                                            _focusedDay = focusedDay;
+                                          });
+                                        },
+                                        onPageChanged: (focusedDay) {
+                                          _focusedDay = focusedDay;
+                                        },
+                                        calendarBuilders: CalendarBuilders(
+                                          defaultBuilder: (context, day, focusedDay) {
+                                            final dateKey = DateTime(day.year, day.month, day.day);
+                                            final servicios = serviciosPorDia[dateKey];
+                                            final noLab = noLaborablesPorDia[dateKey];
+                                            final mants = mantenimientosEnFecha(dateKey);
+                                            final tieneServicios = servicios != null && servicios.isNotEmpty;
+                                            final coloresPilotos = _obtenerColoresPilotos(servicios, primary);
+
+                                            if (noLab != null) {
+                                              return Container(
+                                                margin: const EdgeInsets.all(3.0),
+                                                alignment: Alignment.center,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.redAccent.withValues(alpha: isDark ? 0.22 : 0.14),
+                                                  borderRadius: BorderRadius.circular(10),
+                                                  border: Border.all(
+                                                    color: Colors.redAccent.withValues(alpha: 0.7),
+                                                    width: 1.2,
+                                                  ),
+                                                ),
+                                                child: _buildDayCellContent(
+                                                  day.day,
+                                                  coloresPilotos,
+                                                  TextStyle(
+                                                    color: Colors.redAccent,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13,
+                                                    decoration: TextDecoration.lineThrough,
+                                                  ),
+                                                ),
+                                              );
+                                            }
+
+                                            if (mants.isNotEmpty && !tieneServicios) {
+                                              return Container(
+                                                margin: const EdgeInsets.all(3.0),
+                                                alignment: Alignment.center,
+                                                decoration: BoxDecoration(
+                                                  color: Colors.deepPurpleAccent.withValues(alpha: 0.16),
+                                                  borderRadius: BorderRadius.circular(10),
+                                                  border: Border.all(
+                                                    color: Colors.deepPurpleAccent.withValues(alpha: 0.55),
+                                                    width: 1.2,
+                                                  ),
+                                                ),
+                                                child: _buildDayCellContent(
+                                                  day.day,
+                                                  const [],
+                                                  TextStyle(
+                                                    color: text,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              );
+                                            }
+
+                                            if (tieneServicios) {
+                                              final hayCancelados = servicios.every((s) => s.estado == 'CANCELADO');
+                                              final todosCompletados = servicios.every((s) => s.estado == 'COMPLETADO');
+                                              final hayReprog = servicios.any((s) => s.reprogramado);
+                                              final Color baseColor = hayCancelados
+                                                  ? AgroTheme.getError(context)
+                                                  : (todosCompletados
+                                                      ? const Color(0xFF22C55E)
+                                                      : (hayReprog ? Colors.orange : primary));
+
+                                              return Container(
+                                                margin: const EdgeInsets.all(3.0),
+                                                alignment: Alignment.center,
+                                                decoration: BoxDecoration(
+                                                  color: baseColor.withValues(alpha: 0.16),
+                                                  borderRadius: BorderRadius.circular(10),
+                                                  border: Border.all(color: baseColor.withValues(alpha: 0.45), width: 1.2),
+                                                ),
+                                                child: _buildDayCellContent(
+                                                  day.day,
+                                                  coloresPilotos,
+                                                  TextStyle(
+                                                    color: text,
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              );
+                                            }
+                                            return null;
+                                          },
+                                          todayBuilder: (context, day, focusedDay) {
+                                            final dateKey = DateTime(day.year, day.month, day.day);
+                                            final servicios = serviciosPorDia[dateKey];
+                                            final noLab = noLaborablesPorDia[dateKey];
+                                            final tieneProgramacion = servicios != null && servicios.isNotEmpty;
+                                            final coloresPilotos = _obtenerColoresPilotos(servicios, primary);
+
+                                            return Container(
+                                              margin: const EdgeInsets.all(3.0),
+                                              alignment: Alignment.center,
+                                              decoration: BoxDecoration(
+                                                color: noLab != null
+                                                    ? Colors.redAccent.withValues(alpha: 0.2)
+                                                    : (tieneProgramacion ? primary.withValues(alpha: 0.2) : Colors.transparent),
+                                                borderRadius: BorderRadius.circular(10),
+                                                border: Border.all(color: primary, width: 2.0),
+                                              ),
+                                              child: _buildDayCellContent(
+                                                day.day,
+                                                coloresPilotos,
+                                                TextStyle(
+                                                  color: primary,
+                                                  fontWeight: FontWeight.w900,
+                                                  fontSize: 13,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          selectedBuilder: (context, day, focusedDay) {
+                                            final dateKey = DateTime(day.year, day.month, day.day);
+                                            final servicios = serviciosPorDia[dateKey];
+                                            final coloresPilotos = _obtenerColoresPilotos(servicios, Colors.white);
+
+                                            return Container(
+                                              margin: const EdgeInsets.all(3.0),
+                                              alignment: Alignment.center,
+                                              decoration: BoxDecoration(
+                                                color: primary,
+                                                borderRadius: BorderRadius.circular(10),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: primary.withValues(alpha: 0.4),
+                                                    blurRadius: 6,
+                                                    offset: const Offset(0, 2),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: _buildDayCellContent(
+                                                day.day,
+                                                coloresPilotos,
+                                                TextStyle(
+                                                  color: Theme.of(context).colorScheme.onPrimary,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 14,
+                                                ),
+                                              ),
+                                            );
+                                          },
+                                          markerBuilder: (context, date, events) {
+                                            final dateKey = DateTime(date.year, date.month, date.day);
+                                            final serviciosEnDia = serviciosPorDia[dateKey] ?? const <ServicioModel>[];
+                                            final noLab = noLaborablesPorDia[dateKey];
+                                            final mants = mantenimientosEnFecha(dateKey);
+
+                                            final puntos = <Color>[];
+                                            if (noLab != null) puntos.add(Colors.redAccent);
+                                            if (mants.isNotEmpty) puntos.add(Colors.deepPurpleAccent);
+
+                                            for (final s in serviciosEnDia.take(3)) {
+                                              if (s.estado == 'COMPLETADO') {
+                                                puntos.add(const Color(0xFF22C55E));
+                                              } else if (s.reprogramado) {
+                                                puntos.add(Colors.orange);
+                                              } else if (s.estado != 'CANCELADO' && dateKey.isBefore(hoySinHora)) {
+                                                puntos.add(Colors.amber);
+                                              } else if (s.estado == 'CANCELADO') {
+                                                puntos.add(AgroTheme.getError(context));
+                                              } else {
+                                                puntos.add(primary);
+                                              }
+                                            }
+
+                                            if (puntos.isEmpty) return null;
+                                            final seleccionado = isSameDay(_diaSeleccionado, date);
+                                            return Positioned(
+                                              bottom: 3,
+                                              child: Row(
+                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                children: puntos.take(4).map((c) {
+                                                  return Container(
+                                                    margin: const EdgeInsets.symmetric(horizontal: 1.5),
+                                                    width: 5,
+                                                    height: 5,
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: seleccionado
+                                                          ? Theme.of(context).colorScheme.onPrimary
+                                                          : c,
+                                                    ),
+                                                  );
+                                                }).toList(),
+                                              ),
+                                            );
+                                          },
+                                        ),
+                                      ),
+
+                                      const Divider(height: 14),
+
+                                      // LEYENDA DE LOS 6 TIPOS DE EVENTOS
+                                      SingleChildScrollView(
+                                        scrollDirection: Axis.horizontal,
+                                        child: Row(
+                                          children: [
+                                            _buildLegendDot(primary, 'Programado'),
+                                            const SizedBox(width: 10),
+                                            _buildLegendDot(const Color(0xFF22C55E), 'Completado'),
+                                            const SizedBox(width: 10),
+                                            _buildLegendDot(Colors.amber, 'Pendiente'),
+                                            const SizedBox(width: 10),
+                                            _buildLegendDot(Colors.orange, 'Reprogramado'),
+                                            const SizedBox(width: 10),
+                                            _buildLegendDot(Colors.deepPurpleAccent, 'Mantenimiento'),
+                                            const SizedBox(width: 10),
+                                            _buildLegendDot(Colors.redAccent, 'No laborable'),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                        ),
+
+                        // 4. ACCIONES RÁPIDAS DEL DÍA SELECCIONADO (Sin salir del calendario)
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 10, 20, 6),
+                            child: SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  FilledButton.icon(
+                                    style: FilledButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    ),
+                                    icon: const Icon(Icons.flight_takeoff, size: 15),
+                                    label: const Text('+ Vuelo', style: TextStyle(fontSize: 12)),
+                                    onPressed: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) => ServiciosScreen(fechaInicial: _diaSeleccionado),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      side: BorderSide(color: Colors.deepPurpleAccent.withValues(alpha: 0.7)),
+                                      foregroundColor: Colors.deepPurpleAccent,
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    ),
+                                    icon: const Icon(Icons.build_circle_outlined, size: 15),
+                                    label: const Text('+ Mantenimiento', style: TextStyle(fontSize: 12)),
+                                    onPressed: () => RegistroMantenimientoDialog.mostrar(
+                                      context,
+                                      fechaInicial: _diaSeleccionado,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  OutlinedButton.icon(
+                                    style: OutlinedButton.styleFrom(
+                                      visualDensity: VisualDensity.compact,
+                                      side: BorderSide(color: Colors.redAccent.withValues(alpha: 0.7)),
+                                      foregroundColor: Colors.redAccent,
+                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    ),
+                                    icon: Icon(
+                                      diaNoLaborableActual == null ? Icons.event_busy_outlined : Icons.edit_calendar,
+                                      size: 15,
+                                    ),
+                                    label: Text(
+                                      diaNoLaborableActual == null ? 'No laborable' : 'Editar bloqueo',
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                    onPressed: () => DiaNoLaborableDialog.mostrar(
+                                      context,
+                                      fecha: _diaSeleccionado,
+                                      existente: diaNoLaborableActual,
+                                    ),
                                   ),
                                 ],
                               ),
-                              child: _buildDayCellContent(
-                                day.day,
-                                coloresPilotos,
-                                const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
-                                ),
-                              ),
-                            );
-                          },
-                          markerBuilder: (context, date, events) {
-                            final dateKey = DateTime(date.year, date.month, date.day);
-                            final serviciosEnDia = serviciosPorDia[dateKey];
-                            if (serviciosEnDia != null && serviciosEnDia.isNotEmpty) {
-                              return Positioned(
-                                bottom: 4,
-                                child: Row(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: serviciosEnDia.take(3).map((s) {
-                                    Color dotColor = primary;
-                                    final cult = s.cultivo.toLowerCase();
-                                    if (cult.contains('siembra')) {
-                                      dotColor = Colors.lightBlueAccent;
-                                    } else if (cult.contains('monitoreo') || cult.contains('mapeo')) {
-                                      dotColor = Colors.orangeAccent;
-                                    } else if (s.estado == 'CANCELADO') {
-                                      dotColor = AgroTheme.error;
-                                    }
-                                    return Container(
-                                      margin: const EdgeInsets.symmetric(horizontal: 1.5),
-                                      width: 5,
-                                      height: 5,
-                                      decoration: BoxDecoration(
-                                        shape: BoxShape.circle,
-                                        color: isSameDay(_diaSeleccionado, date) ? Colors.white : dotColor,
-                                      ),
-                                    );
-                                  }).toList(),
-                                ),
-                              );
-                            }
-                            return null;
-                          },
-                        ),
-                      ),
-
-                      const Divider(height: 16),
-
-                      // LEYENDA (Fumigación • Siembra • Monitoreo • Piloto)
-                      SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _buildLegendDot(primary, 'Fumigación'),
-                            const SizedBox(width: 12),
-                            _buildLegendDot(Colors.lightBlueAccent, 'Siembra'),
-                            const SizedBox(width: 12),
-                            _buildLegendDot(Colors.orangeAccent, 'Monitoreo'),
-                            const SizedBox(width: 12),
-                            _buildLegendDot(const Color(0xFF1E88E5), 'Color Piloto (arriba)'),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                // SECCIÓN: OPERACIONES DEL DÍA
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 8.0),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.calendar_today, size: 16, color: primary),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Operaciones - ${DateFormat("d 'de' MMMM", 'es').format(_diaSeleccionado)}',
-                            style: TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                              color: text,
                             ),
                           ),
-                        ],
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: primary.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: primary.withValues(alpha: 0.4)),
                         ),
-                        child: Text(
-                          '${serviciosDelDia.length} Vuelo${serviciosDelDia.length == 1 ? "" : "s"}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: primary,
+
+                        // 5. BANNER SI ES DÍA NO LABORABLE
+                        if (diaNoLaborableActual != null)
+                          SliverToBoxAdapter(
+                            child: Container(
+                              margin: const EdgeInsets.fromLTRB(20, 6, 20, 4),
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent.withValues(alpha: isDark ? 0.16 : 0.08),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(color: Colors.redAccent.withValues(alpha: 0.6)),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.event_busy_rounded, color: Colors.redAccent, size: 22),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          'Día no laborable: ${diaNoLaborableActual.motivo}',
+                                          style: TextStyle(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.bold,
+                                            color: text,
+                                          ),
+                                        ),
+                                        if (diaNoLaborableActual.descripcion.isNotEmpty) ...[
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            diaNoLaborableActual.descripcion,
+                                            style: TextStyle(fontSize: 12, color: subtext),
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                  TextButton(
+                                    onPressed: () => DiaNoLaborableDialog.mostrar(
+                                      context,
+                                      fecha: _diaSeleccionado,
+                                      existente: diaNoLaborableActual,
+                                    ),
+                                    child: const Text('Editar', style: TextStyle(fontSize: 12)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+
+                        // 6. CABECERA DE ACTIVIDADES DEL DÍA
+                        SliverToBoxAdapter(
+                          child: Padding(
+                            padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      Icon(Icons.calendar_today, size: 16, color: primary),
+                                      const SizedBox(width: 8),
+                                      Flexible(
+                                        child: Text(
+                                          'Agenda • ${DateFormat("d 'de' MMMM", 'es').format(_diaSeleccionado)}',
+                                          style: TextStyle(
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.bold,
+                                            color: text,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: primary.withValues(alpha: 0.14),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: primary.withValues(alpha: 0.35)),
+                                  ),
+                                  child: Text(
+                                    '${serviciosDelDia.length} vuelo${serviciosDelDia.length == 1 ? '' : 's'}'
+                                    '${mantenimientosDelDia.isNotEmpty ? ' • ${mantenimientosDelDia.length} mant.' : ''}',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                      color: primary,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                    ],
-                  ),
-                ),
 
-                // LISTA DE VUELOS (Con padding inferior amplio para que el botón flotante nunca tape las acciones)
-                Expanded(
-                  child: serviciosDelDia.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(Icons.event_available, size: 44, color: primary.withValues(alpha: 0.6)),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Día disponible',
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: text),
+                        // 7. MANTENIMIENTOS PROGRAMADOS DEL DÍA
+                        if (mantenimientosDelDia.isNotEmpty)
+                          SliverPadding(
+                            padding: const EdgeInsets.symmetric(horizontal: 20),
+                            sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) => _buildMantenimientoCard(
+                                  context,
+                                  mantenimientosDelDia[index],
+                                  isDark,
+                                  text,
+                                  subtext,
+                                  cardBg,
+                                  border,
+                                ),
+                                childCount: mantenimientosDelDia.length,
                               ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'No hay vuelos agendados para esta fecha.',
-                                style: TextStyle(fontSize: 12, color: subtext),
-                              ),
-                              const SizedBox(height: 14),
-                              ElevatedButton.icon(
-                                icon: const Icon(Icons.add, size: 16),
-                                label: const Text('Agendar Vuelo para este día'),
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (_) => ServiciosScreen(fechaInicial: _diaSeleccionado),
+                            ),
+                          ),
+
+                        // 8. VUELOS DEL DÍA O ESTADO VACÍO
+                        if (serviciosDelDia.isEmpty && mantenimientosDelDia.isEmpty)
+                          SliverToBoxAdapter(
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+                              child: Container(
+                                padding: const EdgeInsets.all(24),
+                                decoration: BoxDecoration(
+                                  color: cardBg,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: border.withValues(alpha: 0.5)),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Icon(
+                                      diaNoLaborableActual != null
+                                          ? Icons.event_busy_rounded
+                                          : Icons.event_available,
+                                      size: 42,
+                                      color: diaNoLaborableActual != null
+                                          ? Colors.redAccent
+                                          : primary.withValues(alpha: 0.7),
                                     ),
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      diaNoLaborableActual != null
+                                          ? 'Jornada no laborable'
+                                          : 'Día disponible',
+                                      style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold, color: text),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      diaNoLaborableActual != null
+                                          ? 'Esta fecha está bloqueada como ${diaNoLaborableActual.motivo}.'
+                                          : 'No hay vuelos ni mantenimientos agendados para esta fecha.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(fontSize: 12.5, color: subtext),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(20, 4, 20, 100),
+                            sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) {
+                                  final s = serviciosDelDia[index];
+                                  return _buildFlightCard(
+                                    context,
+                                    s,
+                                    isDark,
+                                    primary,
+                                    text,
+                                    subtext,
+                                    cardBg,
+                                    border,
                                   );
                                 },
+                                childCount: serviciosDelDia.length,
                               ),
-                            ],
+                            ),
                           ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.only(left: 20.0, right: 20.0, top: 4.0, bottom: 95.0),
-                          itemCount: serviciosDelDia.length,
-                          itemBuilder: (context, index) {
-                            final s = serviciosDelDia[index];
-                            return _buildFlightCard(context, s, isDark, primary, text, subtext, cardBg, border);
-                          },
-                        ),
-                ),
-              ],
+                      ],
+                    );
+                  },
+                );
+              },
             );
           },
         ),
       ),
-      // BOTÓN FLOTANTE COMPACTO Y ELEGANTE (No obstruye la pantalla)
       floatingActionButton: FloatingActionButton(
         backgroundColor: primary,
-        foregroundColor: Colors.white,
+        foregroundColor: Theme.of(context).colorScheme.onPrimary,
         elevation: 3,
         tooltip: 'Nuevo Vuelo',
         onPressed: () {
@@ -507,6 +850,121 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
           );
         },
         child: const Icon(Icons.add, size: 28),
+      ),
+    );
+  }
+
+  Widget _buildMantenimientoCard(
+    BuildContext context,
+    MantenimientoEquipoModel m,
+    bool isDark,
+    Color text,
+    Color subtext,
+    Color cardBg,
+    Color border,
+  ) {
+    final colorEst = MantenimientoEquipoModel.colorEstado(m.estado);
+    final rango = m.esMultidia
+        ? '${DateFormat('dd/MM hh:mm a').format(m.fechaInicio)} → ${DateFormat('dd/MM hh:mm a').format(m.fechaFin)}'
+        : '${DateFormat('hh:mm a').format(m.fechaInicio)} - ${DateFormat('hh:mm a').format(m.fechaFin)}';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(
+          Colors.deepPurpleAccent.withValues(alpha: isDark ? 0.12 : 0.05),
+          cardBg,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.deepPurpleAccent.withValues(alpha: 0.6), width: 1.4),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.deepPurpleAccent.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(
+                  MantenimientoEquipoModel.iconoCategoria(m.categoriaEquipo),
+                  color: Colors.deepPurpleAccent,
+                  size: 19,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Mantenimiento • ${m.nombreEquipo}',
+                      style: TextStyle(fontSize: 14.5, fontWeight: FontWeight.bold, color: text),
+                    ),
+                    Text(
+                      '${m.tipoMantenimiento}${m.responsable.isNotEmpty ? ' • Resp: ${m.responsable}' : ''}',
+                      style: TextStyle(fontSize: 12, color: subtext),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: colorEst.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  MantenimientoEquipoModel.nombreEstado(m.estado),
+                  style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: colorEst),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              const Icon(Icons.schedule, size: 14, color: Colors.deepPurpleAccent),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(rango, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: text)),
+              ),
+            ],
+          ),
+          if (m.observaciones.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Text(m.observaciones, style: TextStyle(fontSize: 12, color: subtext)),
+          ],
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              if (m.estado != 'COMPLETADO')
+                TextButton.icon(
+                  style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                  icon: const Icon(Icons.check_circle_outline, size: 15),
+                  label: const Text('Completar', style: TextStyle(fontSize: 11.5)),
+                  onPressed: () async {
+                    if (m.id == null) return;
+                    await FirebaseFirestore.instance
+                        .collection('mantenimientos_equipos')
+                        .doc(m.id)
+                        .update({'estado': 'COMPLETADO'});
+                  },
+                ),
+              TextButton.icon(
+                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                icon: const Icon(Icons.edit_outlined, size: 15),
+                label: const Text('Editar', style: TextStyle(fontSize: 11.5)),
+                onPressed: () => RegistroMantenimientoDialog.mostrar(context, existente: m),
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -705,6 +1163,25 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                       ),
                     ),
                   ),
+                  if (s.reprogramado) ...[
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.16),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.orange.withValues(alpha: 0.5)),
+                      ),
+                      child: const Text(
+                        'REPROG.',
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.orange,
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(width: 4),
                   // BOTÓN DE ELIMINACIÓN INTELIGENTE (Diseño limpio y no agolpado)
                   IconButton(
@@ -890,6 +1367,12 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
                     servicioId: s.id,
                     pilotoInicial: s.piloto,
                   ),
+                ),
+                IconButton(
+                  tooltip: 'Parámetros de Aplicación',
+                  icon: const Icon(Icons.tune_rounded, size: 20),
+                  color: primary,
+                  onPressed: () => RegistroParametrosVueloDialog.mostrar(context, servicio: s),
                 ),
                 IconButton(
                   tooltip: 'Calculadora de Insumos y Baterías',
@@ -1506,264 +1989,7 @@ class _CronogramaScreenState extends State<CronogramaScreen> {
   }
 
   void _mostrarDialogoReprogramarVuelo(BuildContext context, ServicioModel s) {
-    DateTime nuevaFecha = s.fecha;
-    TimeOfDay nuevaHora = TimeOfDay(hour: s.fecha.hour, minute: s.fecha.minute);
-    String motivoSeleccionado = '🌧️ Clima / Lluvia';
-    final List<String> motivosComunes = [
-      '🌧️ Clima / Lluvia',
-      '💨 Viento excesivo (>15 km/h)',
-      '👨‍🌾 Aplazamiento por el cliente',
-      '🛸 Mantenimiento técnico / Baterías',
-      '🧪 Insumos químicos no listos',
-      '⚠️ Otro motivo',
-    ];
-    String detalleMotivo = '';
-    bool avisarWhatsApp = s.clienteTelefono.trim().isNotEmpty;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) {
-          final text = AgroTheme.getText(context);
-          final subtext = AgroTheme.getSubtext(context);
-          final primary = AgroTheme.getPrimary(context);
-
-          return AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Icons.event_repeat_rounded, color: Colors.orange, size: 24),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Reprogramar Vuelo', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: text)),
-                      Text('${s.cultivo} • ${s.fincaUbicacion}', style: TextStyle(fontSize: 11, color: subtext)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: primary.withValues(alpha: 0.08),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: primary.withValues(alpha: 0.25)),
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(Icons.person, size: 16, color: primary),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Cliente: ${s.clienteNombre} (${s.hectareas} Ha)',
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: text),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Text('NUEVA FECHA Y HORA DE VUELO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: primary)),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                            side: BorderSide(color: primary.withValues(alpha: 0.5)),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          icon: Icon(Icons.calendar_today, size: 16, color: primary),
-                          label: Text(
-                            DateFormat('dd/MM/yyyy').format(nuevaFecha),
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: text),
-                          ),
-                          onPressed: () async {
-                            final d = await showDatePicker(
-                              context: context,
-                              initialDate: nuevaFecha,
-                              firstDate: DateTime.now().subtract(const Duration(days: 7)),
-                              lastDate: DateTime(2030),
-                            );
-                            if (d != null) setModalState(() => nuevaFecha = d);
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-                            side: BorderSide(color: primary.withValues(alpha: 0.5)),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
-                          icon: Icon(Icons.schedule, size: 16, color: primary),
-                          label: Text(
-                            nuevaHora.format(context),
-                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: text),
-                          ),
-                          onPressed: () async {
-                            final t = await TimePickerHelper.seleccionarHora(context, horaInicial: nuevaHora);
-                            if (t != null) setModalState(() => nuevaHora = t);
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Text('MOTIVO DE LA REPROGRAMACIÓN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: text)),
-                  const SizedBox(height: 6),
-                  DropdownButtonFormField<String>(
-                    initialValue: motivoSeleccionado,
-                    decoration: InputDecoration(
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                    items: motivosComunes.map((m) => DropdownMenuItem(value: m, child: Text(m, style: const TextStyle(fontSize: 12)))).toList(),
-                    onChanged: (val) {
-                      if (val != null) setModalState(() => motivoSeleccionado = val);
-                    },
-                  ),
-                  const SizedBox(height: 8),
-                  TextFormField(
-                    decoration: const InputDecoration(
-                      labelText: 'Detalle o nota adicional (opcional)',
-                      hintText: 'Ej: Se pospone para la tarde por lluvia fuerte',
-                    ),
-                    onChanged: (val) => detalleMotivo = val,
-                  ),
-                  if (s.clienteTelefono.trim().isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    SwitchListTile(
-                      contentPadding: EdgeInsets.zero,
-                      value: avisarWhatsApp,
-                      title: const Text('Notificar al cliente por WhatsApp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      subtitle: Text('Envía un mensaje cordial con la nueva fecha y motivo', style: TextStyle(fontSize: 10, color: subtext)),
-                      onChanged: (val) => setModalState(() => avisarWhatsApp = val),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancelar'),
-              ),
-              ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                icon: const Icon(Icons.check, size: 16),
-                label: const Text('Reprogramar'),
-                onPressed: () async {
-                  if (s.id == null) return;
-
-                  final fechaCompleta = DateTime(
-                    nuevaFecha.year,
-                    nuevaFecha.month,
-                    nuevaFecha.day,
-                    nuevaHora.hour,
-                    nuevaHora.minute,
-                  );
-
-                  final motivoFinal = detalleMotivo.trim().isNotEmpty
-                      ? '$motivoSeleccionado (${detalleMotivo.trim()})'
-                      : motivoSeleccionado;
-
-                  final logReprog = '[Reprogramado el ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}: Nueva fecha: ${DateFormat('dd/MM/yyyy hh:mm a').format(fechaCompleta)} - Motivo: $motivoFinal]';
-                  final notasActualizadas = s.notas.isNotEmpty ? '${s.notas}\n$logReprog' : logReprog;
-
-                  // 1. Actualizar en Firestore
-                  await FirebaseFirestore.instance.collection('servicios').doc(s.id).update({
-                    'fecha': fechaCompleta.toIso8601String(),
-                    'estado': 'PROGRAMADO',
-                    'notas': notasActualizadas,
-                  });
-
-                  // 2. Reprogramar recordatorio de vuelo en NotificationService
-                  final servicioActualizado = ServicioModel(
-                    id: s.id,
-                    clienteId: s.clienteId,
-                    clienteNombre: s.clienteNombre,
-                    clienteTelefono: s.clienteTelefono,
-                    fincaUbicacion: s.fincaUbicacion,
-                    fecha: fechaCompleta,
-                    hectareas: s.hectareas,
-                    litrosAplicados: s.litrosAplicados,
-                    cultivo: s.cultivo,
-                    tipoAplicacion: s.tipoAplicacion,
-                    productoQuimico: s.productoQuimico,
-                    precioPorHectarea: s.precioPorHectarea,
-                    precioTotal: s.precioTotal,
-                    estado: 'PROGRAMADO',
-                    pagado: s.pagado,
-                    notas: notasActualizadas,
-                    metodoPago: s.metodoPago,
-                    piloto: s.piloto,
-                    dron: s.dron,
-                    totalAbonado: s.totalAbonado,
-                  );
-                  await NotificationService.instance.programarRecordatorioVuelo(servicioActualizado);
-
-                  // 3. Notificación local inmediata de reprogramación
-                  await NotificationService.instance.notificarReprogramacionVuelo(
-                    servicioActualizado,
-                    motivoFinal,
-                  );
-
-                  if (ctx.mounted) Navigator.pop(ctx);
-
-                  // 4. Notificar vía WhatsApp si está seleccionado
-                  if (avisarWhatsApp && s.clienteTelefono.trim().isNotEmpty) {
-                    final fechaTexto = DateFormat("EEEE d 'de' MMMM 'a las' hh:mm a", 'es').format(fechaCompleta);
-                    final mensaje = 'Estimado(a) *${s.clienteNombre}*, le informamos de *Icaro Proagro* que su servicio de vuelo (${s.cultivo} en ${s.fincaUbicacion}) ha sido reprogramado.\n\n'
-                        '🗓️ *Nueva Fecha y Hora:* $fechaTexto\n'
-                        '📝 *Motivo:* $motivoFinal\n\n'
-                        'Estamos atentos para confirmar o atender cualquier duda. ¡Muchas gracias por su confianza!';
-
-                    final telefonoLimpio = s.clienteTelefono.replaceAll(RegExp(r'[^0-9]'), '');
-                    final url = Uri.parse('https://wa.me/$telefonoLimpio?text=${Uri.encodeComponent(mensaje)}');
-                    try {
-                      if (await canLaunchUrl(url)) {
-                        await launchUrl(url, mode: LaunchMode.externalApplication);
-                      }
-                    } catch (_) {}
-                  }
-
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('Vuelo reprogramado para el ${DateFormat('dd/MM/yyyy hh:mm a').format(fechaCompleta)}'),
-                        backgroundColor: Colors.orange.shade800,
-                      ),
-                    );
-                  }
-                },
-              ),
-            ],
-          );
-        },
-      ),
-    );
+    ReprogramarVueloDialog.mostrar(context, s);
   }
 
   void _mostrarCalculadoraInsumos(BuildContext context, ServicioModel s) {

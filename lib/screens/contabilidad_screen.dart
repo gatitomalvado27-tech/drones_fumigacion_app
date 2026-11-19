@@ -854,7 +854,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                       spacing: 6,
                       runSpacing: 4,
                       children: [
-                        'TODAS', 'COMBUSTIBLE', 'MANTENIMIENTO', 'PILOTO', 'INSUMOS', 'BATERIAS', 'VIATICOS', 'REPUESTOS', 'CASA', 'OTROS'
+                        'TODAS', ...TransaccionModel.categoriasEgreso
                       ].map((catKey) {
                         final sel = _filtroCategoriaEgreso == catKey;
                         return ChoiceChip(
@@ -3359,6 +3359,8 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
     double monto = 0;
     String categoria = 'COMBUSTIBLE';
     String descripcion = '';
+    String observaciones = '';
+    DateTime fechaGasto = DateTime.now();
     String metodoPago = 'EFECTIVO';
 
     showDialog(
@@ -3366,59 +3368,99 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
       builder: (ctx) => StatefulBuilder(
         builder: (context, setMState) => AlertDialog(
           backgroundColor: Theme.of(context).colorScheme.surface,
-          title: const Text('Registrar Gasto Rápido'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: categoria,
-                items: ['COMBUSTIBLE', 'MANTENIMIENTO', 'PILOTO', 'INSUMOS', 'BATERIAS', 'VIATICOS', 'CASA', 'OTROS']
-                    .map((c) => DropdownMenuItem(value: c, child: Text(c)))
-                    .toList(),
-                onChanged: (val) => setMState(() => categoria = val!),
-                decoration: const InputDecoration(labelText: 'Categoría de Gasto'),
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                decoration: const InputDecoration(labelText: 'Monto del Gasto (\$)'),
-                keyboardType: TextInputType.number,
-                onChanged: (v) => monto = double.tryParse(v) ?? 0,
-              ),
-              const SizedBox(height: 10),
-              TextField(
-                decoration: const InputDecoration(labelText: 'Concepto (ej: Gasolina generador)'),
-                onChanged: (v) => descripcion = v,
-              ),
-              const SizedBox(height: 10),
-              DropdownButtonFormField<String>(
-                initialValue: metodoPago,
-                items: const [
-                  DropdownMenuItem(value: 'EFECTIVO', child: Text('💵 Efectivo')),
-                  DropdownMenuItem(value: 'EN_LINEA', child: Text('💳 Transferencia / En Línea')),
-                ],
-                onChanged: (val) => setMState(() => metodoPago = val ?? 'EFECTIVO'),
-                decoration: const InputDecoration(labelText: 'Método de Pago'),
-              ),
-            ],
+          title: const Text('Registrar Gasto / Egreso'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: categoria,
+                  items: TransaccionModel.categoriasEgreso
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c)))
+                      .toList(),
+                  onChanged: (val) => setMState(() => categoria = val!),
+                  decoration: const InputDecoration(labelText: 'Categoría de Egreso'),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  decoration: const InputDecoration(labelText: 'Valor del Gasto (\$)'),
+                  keyboardType: TextInputType.number,
+                  onChanged: (v) => monto = double.tryParse(v) ?? 0,
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  decoration: InputDecoration(
+                    labelText: 'Descripción / Concepto',
+                    hintText: categoria == 'INTERESES'
+                        ? 'Ej: Intereses préstamo banco / tarjeta'
+                        : 'Ej: Gasolina generador',
+                  ),
+                  onChanged: (v) => descripcion = v,
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  maxLines: 2,
+                  decoration: const InputDecoration(
+                    labelText: 'Observaciones (opcional)',
+                    hintText: 'Detalles adicionales del egreso',
+                  ),
+                  onChanged: (v) => observaciones = v,
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Fecha: ${DateFormat('dd/MM/yyyy').format(fechaGasto)}',
+                      style: TextStyle(fontSize: 13, color: Theme.of(context).colorScheme.onSurfaceVariant),
+                    ),
+                    TextButton.icon(
+                      icon: Icon(Icons.calendar_today, size: 15, color: Theme.of(context).colorScheme.primary),
+                      label: const Text('Cambiar'),
+                      onPressed: () async {
+                        final d = await showDatePicker(
+                          context: context,
+                          initialDate: fechaGasto,
+                          firstDate: DateTime(2023),
+                          lastDate: DateTime(2030),
+                        );
+                        if (d != null) setMState(() => fechaGasto = d);
+                      },
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<String>(
+                  initialValue: metodoPago,
+                  items: const [
+                    DropdownMenuItem(value: 'EFECTIVO', child: Text('💵 Efectivo')),
+                    DropdownMenuItem(value: 'EN_LINEA', child: Text('💳 Transferencia / En Línea')),
+                  ],
+                  onChanged: (val) => setMState(() => metodoPago = val ?? 'EFECTIVO'),
+                  decoration: const InputDecoration(labelText: 'Método de Pago'),
+                ),
+              ],
+            ),
           ),
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancelar')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AgroTheme.error, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: AgroTheme.getError(context), foregroundColor: Colors.white),
               onPressed: () async {
                 if (monto > 0) {
                   await FirebaseFirestore.instance.collection('transacciones').add({
                     'tipo': 'EGRESO',
                     'categoria': categoria,
                     'monto': monto,
-                    'descripcion': descripcion.isNotEmpty ? descripcion : 'Gasto de $categoria',
-                    'fecha': DateTime.now().toIso8601String(),
+                    'descripcion': descripcion.trim().isNotEmpty ? descripcion.trim() : 'Gasto de $categoria',
+                    if (observaciones.trim().isNotEmpty) 'observaciones': observaciones.trim(),
+                    'fecha': fechaGasto.toIso8601String(),
                     'metodoPago': metodoPago,
                   });
                 }
                 if (ctx.mounted) Navigator.pop(ctx);
               },
-              child: const Text('Guardar Gasto'),
+              child: const Text('Guardar Egreso'),
             ),
           ],
         ),
@@ -4021,19 +4063,13 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
     String categoria = transExistente?.categoria ?? 'SERVICIO';
     double monto = transExistente?.monto ?? 0;
     String descripcion = transExistente?.descripcion ?? '';
+    String observaciones = transExistente?.observaciones ?? '';
     DateTime fecha = transExistente?.fecha ?? DateTime.now();
     String metodoPago = transExistente?.metodoPago ?? 'EFECTIVO';
 
     final categorias = [
-      'SERVICIO',
-      'COMBUSTIBLE',
-      'MANTENIMIENTO',
-      'PILOTO',
-      'INSUMOS',
-      'BATERIAS',
-      'VIATICOS',
-      'CASA',
-      'OTROS',
+      ...TransaccionModel.categoriasTodas,
+      if (!TransaccionModel.categoriasTodas.contains(categoria)) categoria,
     ];
 
     showDialog(
@@ -4104,6 +4140,16 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                         onSaved: (val) => descripcion = val!,
                       ),
                       const SizedBox(height: 10),
+                      TextFormField(
+                        initialValue: observaciones,
+                        maxLines: 2,
+                        decoration: const InputDecoration(
+                          labelText: 'Observaciones (opcional)',
+                          hintText: 'Notas adicionales del movimiento',
+                        ),
+                        onSaved: (val) => observaciones = val?.trim() ?? '',
+                      ),
+                      const SizedBox(height: 10),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
@@ -4145,6 +4191,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                           'categoria': categoria,
                           'monto': monto,
                           'descripcion': descripcion,
+                          if (observaciones.isNotEmpty) 'observaciones': observaciones,
                           'fecha': fecha.toIso8601String(),
                           'metodoPago': metodoPago,
                         });
@@ -4154,6 +4201,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
                           'categoria': categoria,
                           'monto': monto,
                           'descripcion': descripcion,
+                          'observaciones': observaciones,
                           'fecha': fecha.toIso8601String(),
                           'metodoPago': metodoPago,
                         });
@@ -4359,6 +4407,7 @@ class _ContabilidadScreenState extends State<ContabilidadScreen> with SingleTick
     if (c.contains('VIATICO') || c.contains('VIÁTICO') || c.contains('TRANSPORTE')) return Icons.directions_car_outlined;
     if (c.contains('REPUESTO')) return Icons.precision_manufacturing_outlined;
     if (c.contains('SEGURO')) return Icons.security_outlined;
+    if (c.contains('INTERES')) return Icons.percent_rounded;
     return Icons.receipt_outlined;
   }
 }

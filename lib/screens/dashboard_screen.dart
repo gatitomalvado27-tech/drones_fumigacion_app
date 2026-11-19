@@ -1,21 +1,21 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../theme/agro_theme.dart';
-import '../theme/theme_controller.dart';
 import '../models/servicio_model.dart';
 import '../services/clima_service.dart';
 import '../utils/crop_helper.dart';
 import 'servicios_screen.dart';
 import 'herramientas_screen.dart';
-import 'pin_login_screen.dart';
 import '../utils/operaciones_helper.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
 import 'bitacoras_historial_screen.dart';
 import 'bitacora_danos_screen.dart';
 import 'repuestos_vida_util_screen.dart';
+import 'parametros_vuelo_screen.dart';
+import 'mantenimientos_equipos_screen.dart';
+import 'configuracion_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   final VoidCallback onVerTodasTareas;
@@ -185,25 +185,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       IconButton(
                         constraints: const BoxConstraints(minWidth: 38, minHeight: 38),
                         padding: const EdgeInsets.all(7),
-                        tooltip: ThemeController.instance.isDarkMode ? 'Cambiar a Modo Blanco' : 'Cambiar a Modo Oscuro',
-                        icon: Icon(
-                          ThemeController.instance.isDarkMode ? Icons.light_mode_outlined : Icons.dark_mode_outlined,
-                          color: primary,
-                          size: 22,
-                        ),
+                        tooltip: 'Configuración y Paletas de Color',
+                        icon: Icon(Icons.palette_outlined, color: primary, size: 21),
                         onPressed: () {
-                          ThemeController.instance.alternarTema();
-                          setState(() {});
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const ConfiguracionScreen()),
+                          );
                         },
                       ),
                       const SizedBox(width: 4),
                       InkWell(
-                        onTap: () => _mostrarMenuSeguridad(context),
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const ConfiguracionScreen()),
+                          );
+                        },
                         borderRadius: BorderRadius.circular(20),
                         child: CircleAvatar(
                           radius: 17,
                           backgroundColor: primary.withValues(alpha: 0.15),
-                          child: Icon(Icons.person, color: primary, size: 19),
+                          child: Icon(Icons.settings_outlined, color: primary, size: 19),
                         ),
                       ),
                     ],
@@ -551,104 +554,89 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 ],
               ),
 
-              const SizedBox(height: 26),
+              const SizedBox(height: 22),
+
+              // ACCESOS RÁPIDOS DE GESTIÓN TÉCNICA (Espaciados y sin amontonamiento)
+              Text(
+                'Gestión Técnica y Campo',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.bold,
+                  color: subtext,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 10),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
+                  children: [
+                    _buildAccesoRapidoChip(
+                      icon: Icons.history_edu_rounded,
+                      label: 'Bitácoras',
+                      color: Colors.teal,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const BitacorasHistorialScreen()),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _buildAccesoRapidoChip(
+                      icon: Icons.tune_rounded,
+                      label: 'Parámetros',
+                      color: primary,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const ParametrosVueloScreen()),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _buildAccesoRapidoChip(
+                      icon: Icons.build_circle_outlined,
+                      label: 'Mantenimientos',
+                      color: Colors.deepPurpleAccent,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const MantenimientosEquiposScreen()),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _buildAccesoRapidoChip(
+                      icon: Icons.car_crash_rounded,
+                      label: 'Daños',
+                      color: Colors.redAccent,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const BitacoraDanosScreen()),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _buildAccesoRapidoChip(
+                      icon: Icons.precision_manufacturing_outlined,
+                      label: 'Repuestos',
+                      color: Colors.blueAccent,
+                      onTap: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const RepuestosVidaUtilScreen()),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 24),
 
               // SECCIÓN: PRÓXIMAS TAREAS INTELIGENTE
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Text(
-                        'Próximas Tareas',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: text,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Acceso directo al Historial Inteligente de Bitácoras
-                      InkWell(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const BitacorasHistorialScreen()),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(12),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.teal.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.teal.withValues(alpha: 0.4)),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.history_edu_rounded, size: 13, color: Colors.teal),
-                              SizedBox(width: 4),
-                              Text('Bitácoras', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal)),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      // Acceso directo a Daños de Equipos
-                      InkWell(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const BitacoraDanosScreen()),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(12),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.redAccent.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.redAccent.withValues(alpha: 0.4)),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.car_crash_rounded, size: 13, color: Colors.redAccent),
-                              SizedBox(width: 4),
-                              Text('Daños', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.redAccent)),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      // Acceso directo a Vida Útil de Repuestos
-                      InkWell(
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const RepuestosVidaUtilScreen()),
-                          );
-                        },
-                        borderRadius: BorderRadius.circular(12),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.blue.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.blue.withValues(alpha: 0.4)),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.build_circle_rounded, size: 13, color: Colors.blue),
-                              SizedBox(width: 4),
-                              Text('Repuestos', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.blue)),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ],
+                  Text(
+                    'Próximas Tareas',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: text,
+                    ),
                   ),
                   TextButton(
                     onPressed: widget.onVerTodasTareas,
@@ -1042,285 +1030,40 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
-  void _mostrarMenuSeguridad(BuildContext context) async {
-    final prefs = await SharedPreferences.getInstance();
-    if (!context.mounted) return;
-
-    final pinActual = prefs.getString('proicaro_pin_personalizado') ?? '2026';
-    final primary = AgroTheme.getPrimary(context);
-    final text = AgroTheme.getText(context);
-    final subtext = AgroTheme.getSubtext(context);
+  Widget _buildAccesoRapidoChip({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    final cardBg = AgroTheme.getCard(context);
     final border = AgroTheme.getBorder(context);
-
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
-        child: Column(
+    final text = AgroTheme.getText(context);
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+        decoration: BoxDecoration(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: border.withValues(alpha: 0.65)),
+        ),
+        child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 40,
-              height: 4,
+              padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
-                color: border,
-                borderRadius: BorderRadius.circular(2),
+                color: color.withValues(alpha: 0.14),
+                borderRadius: BorderRadius.circular(8),
               ),
+              child: Icon(icon, size: 16, color: color),
             ),
-            const SizedBox(height: 18),
-            Row(
-              children: [
-                Icon(Icons.shield, color: primary, size: 24),
-                const SizedBox(width: 10),
-                Text(
-                  'Seguridad & Acceso Icaro Proagro',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: text),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text('Protección por PIN:', style: TextStyle(fontSize: 13, color: subtext)),
-                  Row(
-                    children: [
-                      Icon(Icons.lock, size: 14, color: primary),
-                      const SizedBox(width: 6),
-                      Text(
-                        'Activo (••••)',
-                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: primary),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: ThemeController.instance.isDarkMode ? Colors.amber.withValues(alpha: 0.15) : primary.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  ThemeController.instance.isDarkMode ? Icons.light_mode : Icons.dark_mode,
-                  color: ThemeController.instance.isDarkMode ? Colors.amber : primary,
-                  size: 20,
-                ),
-              ),
-              title: Text(
-                ThemeController.instance.isDarkMode ? 'Modo Blanco (Luz Solar)' : 'Modo Oscuro (Nocturno)',
-                style: TextStyle(fontWeight: FontWeight.bold, color: text),
-              ),
-              subtitle: Text(
-                ThemeController.instance.isDarkMode ? 'Fondo claro con verde nítido para trabajo en campo' : 'Fondo oscuro de cabina Stitch',
-                style: TextStyle(fontSize: 12, color: subtext),
-              ),
-              trailing: Switch(
-                value: !ThemeController.instance.isDarkMode,
-                activeThumbColor: primary,
-                onChanged: (val) {
-                  ThemeController.instance.alternarTema();
-                  Navigator.pop(ctx);
-                  setState(() {});
-                },
-              ),
-            ),
-            Divider(color: border.withValues(alpha: 0.5)),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: primary.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.key, color: primary, size: 20),
-              ),
-              title: Text('Cambiar PIN de Acceso', style: TextStyle(color: text, fontWeight: FontWeight.bold)),
-              subtitle: Text('Requiere ingresar el PIN actual por seguridad', style: TextStyle(color: subtext, fontSize: 12)),
-              trailing: Icon(Icons.arrow_forward_ios, size: 14, color: subtext),
-              onTap: () {
-                Navigator.pop(ctx);
-                _mostrarDialogoCambiarPin(context, pinActual);
-              },
-            ),
-            Divider(color: border.withValues(alpha: 0.5)),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AgroTheme.error.withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.lock_outline, color: AgroTheme.error, size: 20),
-              ),
-              title: const Text('Bloquear este celular', style: TextStyle(color: AgroTheme.error, fontWeight: FontWeight.bold)),
-              subtitle: Text('Exigirá el PIN la próxima vez que se abra', style: TextStyle(color: subtext, fontSize: 12)),
-              onTap: () async {
-                await prefs.setBool('proicaro_dispositivo_autorizado', false);
-                if (!ctx.mounted) return;
-                Navigator.pop(ctx);
-                Navigator.of(context).pushReplacement(
-                  MaterialPageRoute(builder: (_) => const PinLoginScreen()),
-                );
-              },
-            ),
-            const SizedBox(height: 10),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _mostrarDialogoCambiarPin(BuildContext context, String pinActualConfigurado) {
-    String pinActualIngresado = '';
-    String nuevoPin = '';
-    String confirmarPin = '';
-    String? errorLocal;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (context, setModalState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.shield_outlined, size: 22, color: AgroTheme.primary),
-              SizedBox(width: 8),
-              Text('Cambiar PIN', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'PIN Actual:',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                TextField(
-                  keyboardType: TextInputType.number,
-                  maxLength: 4,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    hintText: 'PIN actual',
-                    counterText: '',
-                    prefixIcon: Icon(Icons.lock_clock, size: 18),
-                  ),
-                  onChanged: (val) {
-                    pinActualIngresado = val;
-                    if (errorLocal != null) setModalState(() => errorLocal = null);
-                  },
-                ),
-                const SizedBox(height: 14),
-                const Text(
-                  'Nuevo PIN (4 dígitos):',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                TextField(
-                  keyboardType: TextInputType.number,
-                  maxLength: 4,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    hintText: 'Nuevo PIN',
-                    counterText: '',
-                    prefixIcon: Icon(Icons.pin, size: 18),
-                  ),
-                  onChanged: (val) {
-                    nuevoPin = val;
-                    if (errorLocal != null) setModalState(() => errorLocal = null);
-                  },
-                ),
-                const SizedBox(height: 14),
-                const Text(
-                  'Confirmar Nuevo PIN:',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 4),
-                TextField(
-                  keyboardType: TextInputType.number,
-                  maxLength: 4,
-                  obscureText: true,
-                  decoration: const InputDecoration(
-                    hintText: 'Repite el nuevo PIN',
-                    counterText: '',
-                    prefixIcon: Icon(Icons.check_circle_outline, size: 18),
-                  ),
-                  onChanged: (val) {
-                    confirmarPin = val;
-                    if (errorLocal != null) setModalState(() => errorLocal = null);
-                  },
-                ),
-                if (errorLocal != null) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AgroTheme.error.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      errorLocal!,
-                      style: const TextStyle(fontSize: 11.5, color: AgroTheme.error, fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar'),
-            ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AgroTheme.primary,
-                foregroundColor: Colors.white,
-              ),
-              onPressed: () async {
-                if (pinActualIngresado != pinActualConfigurado) {
-                  setModalState(() => errorLocal = 'El PIN actual no es correcto.');
-                  return;
-                }
-                if (nuevoPin.length != 4) {
-                  setModalState(() => errorLocal = 'El nuevo PIN debe tener exactamente 4 dígitos.');
-                  return;
-                }
-                if (nuevoPin != confirmarPin) {
-                  setModalState(() => errorLocal = 'La confirmación del PIN no coincide.');
-                  return;
-                }
-
-                final prefs = await SharedPreferences.getInstance();
-                await prefs.setString('proicaro_pin_personalizado', nuevoPin);
-                if (!ctx.mounted) return;
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('¡PIN de acceso actualizado con éxito!'),
-                    backgroundColor: AgroTheme.primary,
-                  ),
-                );
-              },
-              child: const Text('Guardar'),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: text),
             ),
           ],
         ),
